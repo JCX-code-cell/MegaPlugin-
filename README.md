@@ -19,33 +19,6 @@
 | 🏪 **玩家市场** | `/market` `/ah` `/shop` - 可视化交易系统 |
 | 🔐 **登录系统** | 铁砧 GUI 登录/注册，离线模式安全保护 |
 
-## 🚀 快速开始
-
-### 编译（需要 JDK 21）
-
-```bash
-# 使用 Maven
-mvn clean package
-
-# 或手动编译
-javac -cp "purpur-api-1.21.11.jar" -d target/classes src/main/java/com/megaplugin/**/*.java
-jar cf MegaPlugin-1.0.0.jar -C target/classes .
-```
-
-### 安装
-
-将 `MegaPlugin-1.0.0.jar` 复制到服务器的 `plugins/` 目录，重启服务器。
-
-### 配置
-
-`plugins/MegaPlugin/config.yml`：
-```yaml
-messages:
-  prefix: "&8[&6Mega&ePlugin&8]&r"
-  no-permission: "{prefix} &c你没有权限！"
-  player-only: "{prefix} &c只有玩家可以使用此命令！"
-  player-not-found: "{prefix} &c玩家未找到！"
-```
 权限节点
 
 | 权限 | 默认 | 说明 |
