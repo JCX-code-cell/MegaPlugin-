@@ -1,0 +1,32 @@
+# MegaPlugin 配置文件
+# 一个综合性的CMI替代插件
+
+# 经济系统设置
+economy:
+  enabled: true
+  starting-balance: 100.0
+  currency-symbol: "$"
+  currency-name-singular: "元"
+  currency-name-plural: "元"
+
+# 传送设置
+teleport:
+  request-timeout: 60
+  back-on-death: true
+
+# 聊天设置
+chat:
+  default-nick-color: "&7"
+
+# 礼包设置
+kits:
+  cooldown-check-interval: 20
+
+# 消息配置 (支持 & 颜色代码)
+messages:
+  prefix: "&8[&6Mega&ePlugin&8]&r"
+  no-permission: "{prefix} &c你没有权限！"
+  player-only: "{prefix} &c只有玩家可以使用此命令！"
+  player-not-found: "{prefix} &c玩家未找到！"
+  invalid-number: "{prefix} &c无效的数字！"
+  config-reloaded: "{prefix} &a配置已重新加载！"

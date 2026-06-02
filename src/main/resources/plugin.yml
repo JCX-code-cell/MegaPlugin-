@@ -1,0 +1,225 @@
+name: MegaPlugin
+version: "1.0.0"
+main: com.megaplugin.MegaPlugin
+api-version: "1.21"
+description: A comprehensive plugin replacing CMI with homes, warps, tpa, economy, kits, admin tools and more.
+author: ServerAdmin
+website: https://github.com
+
+permissions:
+  megaplugin.*:
+    description: All MegaPlugin permissions
+    default: op
+    children:
+      megaplugin.home: true
+      megaplugin.home.other: true
+      megaplugin.warp: true
+      megaplugin.warp.admin: true
+      megaplugin.tpa: true
+      megaplugin.tp: true
+      megaplugin.back: true
+      megaplugin.spawn: true
+      megaplugin.spawn.set: true
+      megaplugin.economy: true
+      megaplugin.economy.admin: true
+      megaplugin.admin: true
+      megaplugin.chat: true
+      megaplugin.chat.admin: true
+      megaplugin.kit: true
+      megaplugin.kit.admin: true
+
+  megaplugin.home:
+    default: true
+  megaplugin.home.other:
+    default: op
+  megaplugin.warp:
+    default: true
+  megaplugin.warp.admin:
+    default: op
+  megaplugin.tpa:
+    default: true
+  megaplugin.tp:
+    default: op
+  megaplugin.back:
+    default: true
+  megaplugin.spawn:
+    default: true
+  megaplugin.spawn.set:
+    default: op
+  megaplugin.economy:
+    default: true
+  megaplugin.economy.admin:
+    default: op
+  megaplugin.admin:
+    default: op
+  megaplugin.chat:
+    default: true
+  megaplugin.chat.admin:
+    default: op
+  megaplugin.kit:
+    default: true
+  megaplugin.kit.admin:
+    default: op
+  megaplugin.market:
+    default: true
+  megaplugin.market.sell:
+    default: true
+
+commands:
+  sethome:
+    description: Set a home location
+    usage: /sethome <name>
+  home:
+    description: Teleport to a home
+    usage: /home [name]
+  delhome:
+    description: Delete a home
+    usage: /delhome <name>
+  homes:
+    description: List your homes
+    usage: /homes [player]
+  setwarp:
+    description: Set a warp location
+    usage: /setwarp <name>
+  warp:
+    description: Teleport to a warp
+    usage: /warp <name>
+  delwarp:
+    description: Delete a warp
+    usage: /delwarp <name>
+  warps:
+    description: List warps
+    usage: /warps
+  tpa:
+    description: Request teleport to a player
+    usage: /tpa <player>
+  tpahere:
+    description: Request player to teleport to you
+    usage: /tpahere <player>
+  tpaccept:
+    description: Accept a teleport request
+    usage: /tpaccept
+    aliases: [tpyes]
+  tpdeny:
+    description: Deny a teleport request
+    usage: /tpdeny
+    aliases: [tpno]
+  tp:
+    description: Teleport to a player
+    usage: /tp <player>
+  tphere:
+    description: Teleport a player to you
+    usage: /tphere <player>
+  tpo:
+    description: Force teleport (bypass restrictions)
+    usage: /tpo <player>
+  back:
+    description: Return to previous location
+    usage: /back
+  spawn:
+    description: Teleport to spawn
+    usage: /spawn
+  setspawn:
+    description: Set spawn location
+    usage: /setspawn
+  balance:
+    description: Check your balance
+    usage: /balance
+    aliases: [bal, money]
+  pay:
+    description: Pay a player
+    usage: /pay <player> <amount>
+  eco:
+    description: Manage economy
+    usage: /eco <give|take|set> <player> <amount>
+  baltop:
+    description: Top player balances
+    usage: /baltop [page]
+  gmc:
+    description: Creative mode
+    usage: /gmc [player]
+  gms:
+    description: Survival mode
+    usage: /gms [player]
+  gma:
+    description: Adventure mode
+    usage: /gma [player]
+  gmsp:
+    description: Spectator mode
+    usage: /gmsp [player]
+  fly:
+    description: Toggle flight mode
+    usage: /fly [player]
+  god:
+    description: Toggle god mode
+    usage: /god [player]
+  heal:
+    description: Heal a player
+    usage: /heal [player]
+  feed:
+    description: Feed a player
+    usage: /feed [player]
+  vanish:
+    description: Toggle vanish mode
+    usage: /vanish [player]
+    aliases: [v]
+  invsee:
+    description: View a player's inventory
+    usage: /invsee <player>
+  nick:
+    description: Set nickname
+    usage: /nick <name|reset> or /nick <player> <name|reset>
+  enderchest:
+    description: Open ender chest
+    usage: /enderchest [player]
+    aliases: [ec]
+  whois:
+    description: View player information
+    usage: /whois <player>
+  broadcast:
+    description: Broadcast a message
+    usage: /broadcast <message>
+    aliases: [bc]
+  kit:
+    description: Claim a kit
+    usage: /kit [name]
+  kits:
+    description: List available kits
+    usage: /kits
+  createkit:
+    description: Create a kit from inventory
+    usage: /createkit <name> <cooldown-seconds>
+  deletekit:
+    description: Delete a kit
+    usage: /deletekit <name>
+  menu:
+    description: Open server menu
+    usage: /menu
+  bind:
+    description: Bind a command to held item
+    usage: /bind <command>
+  unbind:
+    description: Unbind command from held item
+    usage: /unbind
+  binds:
+    description: List your item bindings
+    usage: /binds
+  market:
+    description: Open player market
+    usage: /market [sell <price>|my]
+    aliases: [ah, shop]
+  register:
+    description: Register a new account
+    usage: /register <password> <confirm-password>
+    aliases: [reg]
+  login:
+    description: Login to your account
+    usage: /login <password>
+    aliases: [l]
+  changepassword:
+    description: Change your password
+    usage: /changepassword <old-password> <new-password>
+
+
+
+
