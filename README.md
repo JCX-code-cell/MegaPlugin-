@@ -46,8 +46,7 @@ messages:
   player-only: "{prefix} &c只有玩家可以使用此命令！"
   player-not-found: "{prefix} &c玩家未找到！"
 ```
-
-## 🛡️ 权限节点
+权限节点
 
 | 权限 | 默认 | 说明 |
 |------|------|------|
@@ -57,14 +56,12 @@ messages:
 | `megaplugin.economy.admin` | OP | 经济管理 |
 | `megaplugin.market` | 所有人 | 使用市场 |
 
-## 📦 技术栈
-
+技术栈
 - Java 21
 - Bukkit/Paper/Purpur API
 - SHA-256 + 盐值密码加密
 - YAML 数据持久化
 - Adventure 组件（可点击消息）
 
-## 📄 许可证
-
-MIT License
+许可证
+GPL-3.0
