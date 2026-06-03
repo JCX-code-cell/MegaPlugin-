@@ -2,6 +2,9 @@ package com.megaplugin.module;
 
 import com.megaplugin.MegaPlugin;
 import com.megaplugin.util.DataFile;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.title.Title;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.OfflinePlayer;
@@ -13,6 +16,7 @@ import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 
 import java.text.SimpleDateFormat;
+import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -231,11 +235,26 @@ public class ChatModule extends MegaModule {
             if (args.length == 0) { sender.sendMessage(msg("prefix") + " §c用法: /broadcast <消息>"); return true; }
 
             String message = String.join(" ", args);
-            String formatted = com.megaplugin.util.Color.colorize(
-                    plugin.getConfig().getString("messages.prefix", "") + " §r" + message);
-            Bukkit.broadcast(net.kyori.adventure.text.Component.text(""));
-            Bukkit.broadcast(net.kyori.adventure.text.Component.text(formatted));
-            Bukkit.broadcast(net.kyori.adventure.text.Component.text(""));
+            var serializer = net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacyAmpersand();
+
+            // 全屏大号 Title 显示，持续 7 秒
+            Component title = serializer.deserialize("&6&l" + message);
+            String senderName = sender instanceof Player p ? p.getName() : "管理员";
+            Component subtitle = serializer.deserialize("&7- &e" + senderName + " &7-");
+            Title t = Title.title(title, subtitle,
+                    Title.Times.times(Duration.ofSeconds(1), Duration.ofSeconds(5), Duration.ofSeconds(1)));
+
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                p.showTitle(t);
+            }
+
+            // 同时在聊天栏发送备份
+            Bukkit.broadcast(Component.text(""));
+            Bukkit.broadcast(serializer.deserialize("&8&m           &r &6&l全服公告 &8&m           "));
+            Bukkit.broadcast(Component.text(""));
+            Bukkit.broadcast(serializer.deserialize("  &r&6&l" + message));
+            Bukkit.broadcast(Component.text(""));
+            Bukkit.broadcast(Component.text("§8§m                                    "));
             return true;
         }
     }
