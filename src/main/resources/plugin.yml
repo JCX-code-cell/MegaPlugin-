@@ -233,6 +233,10 @@ commands:
   megapunish:
     description: Progressive punishment tracker
     usage: /megapunish <player> <checkType>
+  claim:
+    description: Land claim management
+    usage: /claim <create|trust|untrust|remove|list>
+    aliases: [claims]
 
 
 

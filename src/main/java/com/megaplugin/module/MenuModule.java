@@ -56,21 +56,22 @@ public class MenuModule extends MegaModule {
     }
 
     private void openMenu(Player player) {
-        Inventory inv = Bukkit.createInventory(null, 27, MENU_TITLE);
+        Inventory inv = Bukkit.createInventory(null, 36, MENU_TITLE);
 
-        inv.setItem(10, createItem(Material.RED_BED, "§c§l家园系统", "§7点击打开家园菜单", "§7/home §8- 回到家园"));
-        inv.setItem(12, createItem(Material.COMPASS, "§b§l地标传送", "§7点击打开地标GUI", "§7/warp §8- 可视化传送"));
-        inv.setItem(14, createItem(Material.ENDER_PEARL, "§a§l玩家传送", "§7点击请求传送", "§7/tpa §8- 请求传送"));
-        inv.setItem(16, createItem(Material.DIAMOND, "§e§l经济系统", "§7点击查看余额", "§7/bal §8- 查看余额"));
+        inv.setItem(11, createItem(Material.RED_BED, "§c§l家园系统", "§7点击打开家园菜单", "§7/home §8- 回到家园"));
+        inv.setItem(13, createItem(Material.COMPASS, "§b§l地标传送", "§7点击打开地标GUI", "§7/warp §8- 可视化传送"));
+        inv.setItem(15, createItem(Material.ENDER_PEARL, "§a§l玩家传送", "§7点击请求传送", "§7/tpa §8- 请求传送"));
 
-        inv.setItem(11, createItem(Material.CHEST, "§6§l礼包领取", "§7点击领取礼包", "§7/kit §8- 领取礼包"));
-        inv.setItem(13, createItem(Material.NETHER_STAR, "§d§l出生点", "§7点击回到出生点", "§7/spawn §8- 回到出生点"));
-        inv.setItem(15, createItem(Material.FILLED_MAP, "§3§l随机传送", "§7点击随机传送", "§7/rtp §8- 冒险探索"));
+        inv.setItem(20, createItem(Material.DIAMOND, "§e§l经济系统", "§7点击查看余额", "§7/bal §8- 查看余额"));
+        inv.setItem(22, createItem(Material.CHEST, "§6§l礼包领取", "§7点击领取礼包", "§7/kit §8- 领取礼包"));
+        inv.setItem(24, createItem(Material.NETHER_STAR, "§d§l出生点", "§7点击回到出生点", "§7/spawn §8- 回到出生点"));
 
-        inv.setItem(22, createItem(Material.EMERALD, "§2§l玩家市场", "§7点击打开交易市场", "§7/market §8- 浏览/购买/出售"));
+        inv.setItem(29, createItem(Material.FILLED_MAP, "§3§l随机传送", "§7点击随机传送", "§7/rtp §8- 冒险探索"));
+        inv.setItem(31, createItem(Material.EMERALD, "§2§l玩家市场", "§7点击打开交易市场", "§7/market §8- 浏览/购买/出售"));
+        inv.setItem(33, createItem(Material.GRASS_BLOCK, "§a§l领地系统", "§7点击打开领地管理", "§7/claim §8- 创建/管理领地"));
 
         ItemStack glass = createItem(Material.BLACK_STAINED_GLASS_PANE, " ");
-        for (int i : new int[]{0,1,2,3,4,5,6,7,8,9,17,18,19,20,21,23,24,25,26}) {
+        for (int i : new int[]{0,1,2,3,4,5,6,7,8,9,10,12,14,16,17,18,19,21,23,25,26,27,28,30,32,34,35}) {
             if (inv.getItem(i) == null) inv.setItem(i, glass);
         }
         player.openInventory(inv);
@@ -94,6 +95,7 @@ public class MenuModule extends MegaModule {
             case "§d§l出生点" -> runCmd(p, "spawn");
             case "§3§l随机传送" -> runCmd(p, "rtp");
             case "§2§l玩家市场" -> runCmd(p, "market");
+            case "§a§l领地系统" -> runCmd(p, "claim");
         }
     }
 
