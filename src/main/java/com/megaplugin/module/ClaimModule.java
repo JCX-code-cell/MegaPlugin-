@@ -484,7 +484,7 @@ public class ClaimModule extends MegaModule {
         } else if (newName == null && oldName != null) {
             // 离开领地
             p.showTitle(Title.title(
-                    Component.text(text("§7离开领地"), NamedTextColor.DARK_GRAY),
+                    Component.empty().color(NamedTextColor.DARK_GRAY).append(text("§7离开领地")),
                     Component.text(""),
                     Title.Times.times(Duration.ofMillis(300), Duration.ofSeconds(1), Duration.ofMillis(300))
             ));
