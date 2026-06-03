@@ -127,6 +127,9 @@ public class ClaimModule extends MegaModule {
         public Location spawn;
         public double price = 0;
         public boolean allowExplosions = false;
+        public boolean allowPvp = true;       // PVP 开关
+        public boolean allowItemUse = true;   // 物品使用 (骨粉/刷怪蛋/染料/船等)
+        public boolean allowMonsters = false; // 怪物生成
 
         /** 显式权限映射: UUID字符串 → Perm */
         public final Map<String, Perm> perms = new LinkedHashMap<>();
@@ -222,6 +225,9 @@ public class ClaimModule extends MegaModule {
                 c.leaveMsg = cfg.getString(key + ".leaveMsg", "");
                 c.price = cfg.getDouble(key + ".price", 0);
                 c.allowExplosions = cfg.getBoolean(key + ".allowExplosions", false);
+                c.allowPvp = cfg.getBoolean(key + ".allowPvp", true);
+                c.allowItemUse = cfg.getBoolean(key + ".allowItemUse", true);
+                c.allowMonsters = cfg.getBoolean(key + ".allowMonsters", false);
                 if (cfg.contains(key + ".spawn")) {
                     var s = cfg.getConfigurationSection(key + ".spawn");
                     if (s != null) c.spawn = new Location(Bukkit.getWorld(s.getString("world", c.world)),
@@ -291,6 +297,9 @@ public class ClaimModule extends MegaModule {
             cfg.set(p + "leaveMsg", c.leaveMsg);
             cfg.set(p + "price", c.price);
             cfg.set(p + "allowExplosions", c.allowExplosions);
+            cfg.set(p + "allowPvp", c.allowPvp);
+            cfg.set(p + "allowItemUse", c.allowItemUse);
+            cfg.set(p + "allowMonsters", c.allowMonsters);
             cfg.set(p + "perms", null); // 清空后重建
             for (var e : c.perms.entrySet()) cfg.set(p + "perms." + e.getKey(), e.getValue().name());
             if (c.spawn != null) {
@@ -374,6 +383,26 @@ public class ClaimModule extends MegaModule {
     // ── 工具方法 ──
     private List<Claim> getPlayerClaims(UUID uid) {
         return claims.values().stream().filter(c -> c.owner.equals(uid)).collect(Collectors.toList());
+    }
+
+    /** 物品使用拒绝 — 组合物品标志检查 + 权限检查 */
+    private boolean denyItemUse(PlayerInteractEvent e, Player p, Block b, Claim c, Perm perm) {
+        if (c != null) {
+            String flagDeny = checkItemFlag(c, p);
+            if (flagDeny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + flagDeny); return true; }
+        }
+        String deny = checkProtection(p, b.getLocation(), perm);
+        if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return true; }
+        return false;
+    }
+
+    /** 检查物品使用标志 — 当 allowItemUse=false 时仅主人/MANAGE可用 */
+    private String checkItemFlag(Claim c, Player p) {
+        if (c.allowItemUse) return null;
+        if (c.owner.equals(p.getUniqueId())) return null;
+        Perm has = c.getPermission(p.getUniqueId());
+        if (has != null && has.ordinal() >= Perm.MANAGE.ordinal()) return null;
+        return "§c此领地禁止物品使用！仅主人/管理员可使用";
     }
 
     private String nextId() {
@@ -522,71 +551,62 @@ public class ClaimModule extends MegaModule {
         }
 
         // ═ RIGHT_CLICK_BLOCK ═
+        // 获取领地引用(用于物品使用标志检查)
+        PlayerData pdRight = getPlayerData(p.getUniqueId());
+        Claim claimHere = pdRight.ignoreClaims ? null : getClaimAt(b.getLocation(), pdRight);
 
         // ── 第一步: 手持物品检查 (对照 GP items needing Build/Container) ──
-        // 骨粉/蜜脾 → BUILD (修改方块)
+        // 骨粉/蜜脾 → BUILD
         if (item == Material.BONE_MEAL || item == Material.HONEYCOMB) {
-            String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
-            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+            if (denyItemUse(e, p, b, claimHere, Perm.BUILD)) return;
         }
         // 末地水晶/打火石 → BUILD
         if (item == Material.END_CRYSTAL || item == Material.FLINT_AND_STEEL) {
-            String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
-            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+            if (denyItemUse(e, p, b, claimHere, Perm.BUILD)) return;
         }
-        // 刷怪蛋 → CONTAINER (生成生物影响领地生态)
+        // 刷怪蛋 → CONTAINER
         if (isSpawnEgg(item)) {
-            String deny = checkProtection(p, b.getLocation(), Perm.CONTAINER);
-            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+            if (denyItemUse(e, p, b, claimHere, Perm.CONTAINER)) return;
         }
-        // 染料/墨囊/荧光墨囊 → CONTAINER (给羊/告示牌染色)
+        // 染料/墨囊/荧光墨囊 → CONTAINER
         if (isDyeItem(item) || item == Material.INK_SAC || item == Material.GLOW_INK_SAC) {
-            String deny = checkProtection(p, b.getLocation(), Perm.CONTAINER);
-            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+            if (denyItemUse(e, p, b, claimHere, Perm.CONTAINER)) return;
         }
         // 船 → CONTAINER
         if (isBoatItem(item)) {
-            String deny = checkProtection(p, b.getLocation(), Perm.CONTAINER);
-            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+            if (denyItemUse(e, p, b, claimHere, Perm.CONTAINER)) return;
         }
         // 矿车 → CONTAINER
         if (isMinecartItem(item)) {
-            String deny = checkProtection(p, b.getLocation(), Perm.CONTAINER);
-            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+            if (denyItemUse(e, p, b, claimHere, Perm.CONTAINER)) return;
         }
         // 盔甲架 → BUILD
         if (item == Material.ARMOR_STAND) {
-            String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
-            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+            if (denyItemUse(e, p, b, claimHere, Perm.BUILD)) return;
         }
         // 末影之眼在传送门框架上 → BUILD
         if (item == Material.ENDER_EYE && b.getType() == Material.END_PORTAL_FRAME) {
-            String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
-            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+            if (denyItemUse(e, p, b, claimHere, Perm.BUILD)) return;
         }
         // 拴绳栓到栅栏/墙壁 → CONTAINER
         if (item == Material.LEAD) {
-            String deny = checkProtection(p, b.getLocation(), Perm.CONTAINER);
-            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+            if (denyItemUse(e, p, b, claimHere, Perm.CONTAINER)) return;
         }
         // 命名牌使用 → CONTAINER
         if (item == Material.NAME_TAG) {
-            String deny = checkProtection(p, b.getLocation(), Perm.CONTAINER);
-            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+            if (denyItemUse(e, p, b, claimHere, Perm.CONTAINER)) return;
         }
-        // 锄头耕土/土径 → BUILD
+        // 锄头耕土 → BUILD
         if (item == Material.WOODEN_HOE || item == Material.STONE_HOE || item == Material.IRON_HOE
                 || item == Material.GOLDEN_HOE || item == Material.DIAMOND_HOE || item == Material.NETHERITE_HOE) {
-            String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
-            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+            if (denyItemUse(e, p, b, claimHere, Perm.BUILD)) return;
         }
         // 铲子造土径 → BUILD
         if (item == Material.WOODEN_SHOVEL || item == Material.STONE_SHOVEL || item == Material.IRON_SHOVEL
                 || item == Material.GOLDEN_SHOVEL || item == Material.DIAMOND_SHOVEL || item == Material.NETHERITE_SHOVEL) {
             if (m == Material.DIRT || m == Material.GRASS_BLOCK || m == Material.PODZOL
                     || m == Material.COARSE_DIRT || m == Material.MYCELIUM) {
-                String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
-                if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+                if (denyItemUse(e, p, b, claimHere, Perm.BUILD)) return;
             }
         }
 
@@ -654,8 +674,15 @@ public class ClaimModule extends MegaModule {
         // 检查受害者位置 — PVP 需要 MANAGE 权限才允许 (仅主人/管理可PVP)
         Claim c = getClaimAt(victim.getLocation(), null);
         if (c != null) {
+            // 领地 PVP 开关: 关闭时任何人都不能 PVP
+            if (!c.allowPvp) {
+                e.setCancelled(true);
+                attacker.sendMessage(msg("prefix") + " §c此领地禁止 PVP！");
+                return;
+            }
+            // 否则检查 BUILD 权限
             String deny = c.checkPermission(attacker.getUniqueId(), attacker.getName(), Perm.BUILD);
-            if (deny != null) { // 没有BUILD权限 → 不允许PVP
+            if (deny != null) {
                 e.setCancelled(true);
                 attacker.sendMessage(msg("prefix") + " §c此领地禁止 PVP！");
             }
@@ -734,7 +761,7 @@ public class ClaimModule extends MegaModule {
                 || e.getSpawnReason() == CreatureSpawnEvent.SpawnReason.COMMAND) return;
         Claim c = getClaimAt(e.getLocation(), null);
         if (c == null) return;
-        if (e.getEntity() instanceof Monster) e.setCancelled(true);
+        if (e.getEntity() instanceof Monster && !c.allowMonsters) e.setCancelled(true);
     }
 
     // ── 植物/树木生长不穿越领地边界 (对照 GP onTreeGrow) ──
@@ -1397,16 +1424,44 @@ public class ClaimModule extends MegaModule {
     }
 
     private void openSettingsGui(Player p, Claim c) {
-        Inventory inv = Bukkit.createInventory(null, 27, GUI_SETTINGS);
-        inv.setItem(0, createItem(Material.GRASS_BLOCK, "§a§l" + c.name));
-        inv.setItem(11, createItem(Material.OAK_SIGN, "§b§l公告消息", "§7设置进出提示"));
-        inv.setItem(12, createItem(Material.TNT, "§c§l爆炸: " + (c.allowExplosions ? "§a允许" : "§c禁止")));
-        inv.setItem(13, createItem(Material.GOLD_INGOT, "§2§l出售领地", "§7价格: " + (c.price > 0 ? "§e" + c.price : "§7不出售")));
-        inv.setItem(14, createItem(Material.ENDER_PEARL, "§d§l设置传送点"));
-        inv.setItem(15, createItem(Material.NAME_TAG, "§e§l重命名"));
-        inv.setItem(18, createItem(Material.ARROW, "§c§l返回"));
-        inv.setItem(26, createItem(Material.BARRIER, "§c§l关闭"));
-        fillGlass(inv, 0, 27);
+        Inventory inv = Bukkit.createInventory(null, 54, GUI_SETTINGS);
+        // 第一行: 标题
+        inv.setItem(4, createItem(Material.GRASS_BLOCK, "§a§l" + c.name,
+                "§7大小: §e" + (c.maxX - c.minX + 1) + "x" + (c.maxZ - c.minZ + 1),
+                "§7坐标: §f" + c.minX + "," + c.minZ + " ~ " + c.maxX + "," + c.maxZ));
+
+        // 第二行: 功能开关
+        String ex = c.allowExplosions ? "§a§l✔ 允许" : "§c§l✘ 禁止";
+        inv.setItem(19, createItem(Material.TNT, "§c§l爆炸 " + ex,
+                "§7控制领地内爆炸是否破坏方块", "§7点击切换"));
+        String pv = c.allowPvp ? "§a§l✔ 允许" : "§c§l✘ 禁止";
+        inv.setItem(22, createItem(Material.DIAMOND_SWORD, "§c§lPVP " + pv,
+                "§7控制领地内玩家对战", "§7点击切换"));
+        String mb = c.allowMonsters ? "§a§l✔ 允许" : "§c§l✘ 禁止";
+        inv.setItem(25, createItem(Material.ZOMBIE_HEAD, "§c§l怪物生成 " + mb,
+                "§7控制领地内怪物自然生成", "§7点击切换"));
+
+        // 第三行: 物品和功能
+        String iu = c.allowItemUse ? "§a§l✔ 允许" : "§c§l✘ 禁止";
+        inv.setItem(28, createItem(Material.BONE_MEAL, "§c§l物品使用 " + iu,
+                "§7控制骨粉/刷怪蛋/染料/船/矿车等",
+                "§7禁止时仅主人和管理员可使用", "§7点击切换"));
+        inv.setItem(31, createItem(Material.OAK_SIGN, "§b§l公告消息",
+                "§7设置进出提示", "§7/claim setmsg enter|leave <消息>"));
+        inv.setItem(34, createItem(Material.GOLD_INGOT, "§2§l出售领地",
+                "§7价格: " + (c.price > 0 ? "§e" + c.price : "§7不出售"),
+                "§7/claim sell <价格>"));
+
+        // 第四行: 其他操作
+        inv.setItem(37, createItem(Material.ENDER_PEARL, "§d§l设置传送点",
+                "§7点击设置当前位置为传送点"));
+        inv.setItem(40, createItem(Material.NAME_TAG, "§e§l重命名领地",
+                "§7/claim rename <新名字>"));
+        inv.setItem(43, createItem(Material.ARROW, "§c§l返回"));
+
+        // 第五行: 关闭
+        inv.setItem(49, createItem(Material.BARRIER, "§c§l关闭"));
+        fillGlass(inv, 0, 54);
         p.openInventory(inv);
     }
 
@@ -1523,8 +1578,22 @@ public class ClaimModule extends MegaModule {
         if (cid == null) return;
         Claim c = claims.get(cid);
         if (c == null) return;
+
+        // 开关类 — 点击切换并重新打开
         if (name.startsWith("§c§l爆炸")) {
             c.allowExplosions = !c.allowExplosions; saveAll();
+            p.playSound(p.getLocation(), Sound.UI_BUTTON_CLICK, 0.5f, 1.2f);
+            openSettingsGui(p, c);
+        } else if (name.startsWith("§c§lPVP")) {
+            c.allowPvp = !c.allowPvp; saveAll();
+            p.playSound(p.getLocation(), Sound.UI_BUTTON_CLICK, 0.5f, 1.2f);
+            openSettingsGui(p, c);
+        } else if (name.startsWith("§c§l怪物生成")) {
+            c.allowMonsters = !c.allowMonsters; saveAll();
+            p.playSound(p.getLocation(), Sound.UI_BUTTON_CLICK, 0.5f, 1.2f);
+            openSettingsGui(p, c);
+        } else if (name.startsWith("§c§l物品使用")) {
+            c.allowItemUse = !c.allowItemUse; saveAll();
             p.playSound(p.getLocation(), Sound.UI_BUTTON_CLICK, 0.5f, 1.2f);
             openSettingsGui(p, c);
         } else if (name.equals("§b§l公告消息")) {
@@ -1534,7 +1603,7 @@ public class ClaimModule extends MegaModule {
         } else if (name.equals("§d§l设置传送点")) {
             c.spawn = p.getLocation().clone(); saveAll();
             p.sendMessage(msg("prefix") + " §a传送点已设置！"); p.closeInventory();
-        } else if (name.equals("§e§l重命名")) {
+        } else if (name.equals("§e§l重命名领地")) {
             p.closeInventory(); p.sendMessage(msg("prefix") + " §7使用 §e/claim rename <新名字>");
         }
     }
