@@ -229,6 +229,10 @@ commands:
     description: Anti-cheat management
     usage: /anticheat <toggle|status|reset|check>
     aliases: [ac]
+  rtp:
+    description: Random teleport
+    usage: /rtp
+    aliases: [randomtp, wild]
 
 
 

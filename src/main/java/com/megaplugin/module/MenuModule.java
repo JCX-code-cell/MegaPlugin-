@@ -64,11 +64,12 @@ public class MenuModule extends MegaModule {
 
         inv.setItem(11, createItem(Material.CHEST, "§6§l礼包领取", "§7点击领取礼包", "§7/kit §8- 领取礼包"));
         inv.setItem(13, createItem(Material.NETHER_STAR, "§d§l出生点", "§7点击回到出生点", "§7/spawn §8- 回到出生点"));
+        inv.setItem(15, createItem(Material.FILLED_MAP, "§3§l随机传送", "§7点击随机传送", "§7/rtp §8- 冒险探索"));
 
         inv.setItem(22, createItem(Material.EMERALD, "§2§l玩家市场", "§7点击打开交易市场", "§7/market §8- 浏览/购买/出售"));
 
         ItemStack glass = createItem(Material.BLACK_STAINED_GLASS_PANE, " ");
-        for (int i : new int[]{0,1,2,3,4,5,6,7,8,9,15,17,18,19,20,21,23,24,25,26}) {
+        for (int i : new int[]{0,1,2,3,4,5,6,7,8,9,17,18,19,20,21,23,24,25,26}) {
             if (inv.getItem(i) == null) inv.setItem(i, glass);
         }
         player.openInventory(inv);
@@ -90,6 +91,7 @@ public class MenuModule extends MegaModule {
             case "§e§l经济系统" -> runCmd(p, "bal");
             case "§6§l礼包领取" -> runCmd(p, "kits");
             case "§d§l出生点" -> runCmd(p, "spawn");
+            case "§3§l随机传送" -> runCmd(p, "rtp");
             case "§2§l玩家市场" -> runCmd(p, "market");
         }
     }
