@@ -27,6 +27,9 @@ permissions:
       megaplugin.chat.admin: true
       megaplugin.kit: true
       megaplugin.kit.admin: true
+      megaplugin.market: true
+      megaplugin.market.sell: true
+      megaplugin.anticheat.bypass: true
 
   megaplugin.home:
     default: true
@@ -64,6 +67,9 @@ permissions:
     default: true
   megaplugin.market.sell:
     default: true
+  megaplugin.anticheat.bypass:
+    description: Bypass anti-cheat detection
+    default: op
 
 commands:
   sethome:
@@ -219,6 +225,10 @@ commands:
   changepassword:
     description: Change your password
     usage: /changepassword <old-password> <new-password>
+  anticheat:
+    description: Anti-cheat management
+    usage: /anticheat <toggle|status|reset|check>
+    aliases: [ac]
 
 
 
