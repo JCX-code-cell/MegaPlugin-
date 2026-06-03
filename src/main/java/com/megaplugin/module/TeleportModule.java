@@ -1,302 +1,242 @@
 package com.megaplugin.module;
 
 import com.megaplugin.MegaPlugin;
+import com.megaplugin.util.Color;
 import com.megaplugin.util.DataFile;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Location;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
-import org.bukkit.command.CommandSender;
-import org.bukkit.command.TabCompleter;
+import org.bukkit.command.*;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
+/**
+ * 传送模块 — /tpa /tpahere /tpaccept /tpdeny /tp /tphere /tpo /back
+ */
 public class TeleportModule extends MegaModule {
 
     private final Map<UUID, TeleportRequest> requests = new HashMap<>();
     private final Map<UUID, Location> lastLocation = new HashMap<>();
-    private final DataFile dataFile;
+    private final DataFile data = new DataFile(plugin, "tp_data.yml");
 
-    public TeleportModule(MegaPlugin plugin) {
-        super(plugin);
-        dataFile = new DataFile(plugin, "tp_data.yml");
-    }
+    public TeleportModule(MegaPlugin plugin) { super(plugin); }
 
     @Override
     public void onEnable() {
-        registerListener();
-        register("tpa", new TpaCmd());
-        register("tpahere", new TpahereCmd());
-        register("tpaccept", new TpacceptCmd());
-        register("tpdeny", new TpdenyCmd());
-        register("tp", new TpCmd());
-        register("tphere", new TphereCmd());
-        register("tpo", new TpoCmd());
-        register("back", new BackCmd());
+        listen();
+        cmd("tpa", new TpaCmd());
+        cmd("tpahere", new TpahereCmd());
+        cmd("tpaccept", new TpacceptCmd());
+        cmd("tpdeny", new TpdenyCmd());
+        cmd("tp", new TpCmd());
+        cmd("tphere", new TphereCmd());
+        cmd("tpo", new TpoCmd());
+        cmd("back", new BackCmd());
 
-        // Restore saved last locations
-        for (String key : dataFile.getConfig().getKeys(false)) {
+        for (String k : data.getConfig().getKeys(false)) {
             try {
-                UUID uuid = UUID.fromString(key);
-                Location loc = dataFile.getConfig().getLocation(key);
-                if (loc != null) lastLocation.put(uuid, loc);
+                UUID id = UUID.fromString(k);
+                Location loc = data.getConfig().getLocation(k);
+                if (loc != null) lastLocation.put(id, loc);
             } catch (Exception ignored) {}
         }
     }
 
     @Override
     public void onDisable() {
-        for (var entry : lastLocation.entrySet()) {
-            dataFile.getConfig().set(entry.getKey().toString(), entry.getValue());
+        for (var e : lastLocation.entrySet())
+            data.getConfig().set(e.getKey().toString(), e.getValue());
+        data.save();
+        super.onDisable();
+    }
+
+    private void cmd(String name, CommandExecutor exe) {
+        var c = plugin.getCommand(name);
+        if (c != null) {
+            c.setExecutor(exe);
+            if (exe instanceof TabCompleter t) c.setTabCompleter(t);
         }
-        dataFile.save();
     }
 
     @EventHandler
-    public void onPlayerTeleport(PlayerTeleportEvent e) {
-        // Don't save for plugin-internal teleports
+    public void onTeleport(PlayerTeleportEvent e) {
         if (e.getCause() == PlayerTeleportEvent.TeleportCause.PLUGIN ||
             e.getCause() == PlayerTeleportEvent.TeleportCause.COMMAND ||
-            e.getCause() == PlayerTeleportEvent.TeleportCause.UNKNOWN) {
+            e.getCause() == PlayerTeleportEvent.TeleportCause.UNKNOWN)
             lastLocation.put(e.getPlayer().getUniqueId(), e.getFrom());
-        }
     }
 
     @EventHandler
     public void onDeath(PlayerDeathEvent e) {
-        if (plugin.getConfig().getBoolean("teleport.back-on-death", true)) {
+        if (plugin.getConfig().getBoolean("teleport.back-on-death", true))
             lastLocation.put(e.getPlayer().getUniqueId(), e.getPlayer().getLocation());
-        }
+    }
+
+    @EventHandler
+    public void onQuit(PlayerQuitEvent e) {
+        UUID id = e.getPlayer().getUniqueId();
+        requests.remove(id);
+        requests.values().removeIf(r -> r.target.equals(id));
     }
 
     public void clearRequests(Player player) {
-        requests.remove(player.getUniqueId());
-        requests.entrySet().removeIf(e -> e.getValue().target().equals(player.getUniqueId()));
+        UUID id = player.getUniqueId();
+        requests.remove(id);
+        requests.values().removeIf(r -> r.target.equals(id));
     }
 
-    @SuppressWarnings("deprecation")
-    private void register(String name, CommandExecutor executor) {
-        var cmd = plugin.getCommand(name);
-        if (cmd != null) {
-            cmd.setExecutor(executor);
-            if (executor instanceof TabCompleter t) cmd.setTabCompleter(t);
-        }
-    }
+    private record TeleportRequest(UUID requester, UUID target, boolean here, long expire) {}
 
-    private record TeleportRequest(UUID requester, UUID target, boolean here, long time) {}
-
-    /** Send clickable accept/deny buttons to the target player */
-    private void sendClickableRequest(Player requester, Player target, boolean here, int timeout) {
-        String action = here ? "想让你传送到他身边" : "想要传送到你身边";
-        Component msg = Component.text()
-                .append(Component.text(com.megaplugin.util.Color.colorize(msg("prefix"))))
-                .append(Component.text(requester.getName(), NamedTextColor.YELLOW))
-                .append(Component.text(" " + action + "！ ", NamedTextColor.GREEN))
-                .append(Component.text("  [", NamedTextColor.GRAY))
-                .append(Component.text("接受", NamedTextColor.GREEN, TextDecoration.BOLD)
+    private void sendClickable(Player from, Player to, boolean here) {
+        int timeout = plugin.getConfig().getInt("teleport.request-timeout", 60);
+        String act = here ? "想让你传送到他身边" : "想要传送到你身边";
+        to.sendMessage(Component.text()
+                .append(Color.toComponent(Color.colorize(msg("prefix"))))
+                .append(Component.text(from.getName(), NamedTextColor.YELLOW))
+                .append(Component.text(" " + act + "！ ", NamedTextColor.GREEN))
+                .append(Component.text("[接受]", NamedTextColor.GREEN, TextDecoration.BOLD)
                         .clickEvent(ClickEvent.runCommand("/tpaccept")))
-                .append(Component.text("]  [", NamedTextColor.GRAY))
-                .append(Component.text("拒绝", NamedTextColor.RED, TextDecoration.BOLD)
+                .append(Component.text(" [拒绝]", NamedTextColor.RED, TextDecoration.BOLD)
                         .clickEvent(ClickEvent.runCommand("/tpdeny")))
-                .append(Component.text("]  ", NamedTextColor.GRAY))
-                .append(Component.text("(" + timeout + "秒后过期)", NamedTextColor.DARK_GRAY))
-                .build();
-        target.sendMessage(msg);
+                .append(Component.text(" (" + timeout + "秒)", NamedTextColor.DARK_GRAY))
+                .build());
     }
 
-    private class TpaCmd implements CommandExecutor, TabCompleter {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
+    // ── 命令内部类 ──
+    class TpaCmd implements CommandExecutor, TabCompleter {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!(s instanceof Player p)) { s.sendMessage(msg("player-only")); return true; }
             if (!p.hasPermission("megaplugin.tpa")) { p.sendMessage(msg("no-permission")); return true; }
-            if (args.length == 0) { p.sendMessage(msg("prefix") + " §c用法: /tpa <玩家>"); return true; }
-            Player target = plugin.getServer().getPlayer(args[0]);
-            if (target == null) { p.sendMessage(msg("player-not-found")); return true; }
-            if (target.equals(p)) { p.sendMessage(msg("prefix") + " §c你不能传送自己！"); return true; }
-
+            if (a.length == 0) { p.sendMessage(msg("prefix") + " §c用法: /tpa <玩家>"); return true; }
+            Player t = plugin.getServer().getPlayer(a[0]);
+            if (t == null || t == p) { p.sendMessage(msg("prefix") + " §c目标无效！"); return true; }
             int timeout = plugin.getConfig().getInt("teleport.request-timeout", 60);
-            requests.put(target.getUniqueId(), new TeleportRequest(p.getUniqueId(), target.getUniqueId(), false, System.currentTimeMillis() + timeout * 1000L));
-
-            p.sendMessage(msg("prefix") + " §a传送请求已发送给 §e" + target.getName());
-            sendClickableRequest(p, target, false, timeout);
+            requests.put(t.getUniqueId(), new TeleportRequest(p.getUniqueId(), t.getUniqueId(), false, System.currentTimeMillis() + timeout * 1000L));
+            p.sendMessage(msg("prefix") + " §a请求已发送给 §e" + t.getName());
+            sendClickable(p, t, false);
             return true;
         }
-
-        @Override
-        public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
-            if (args.length == 1) {
-                return plugin.getServer().getOnlinePlayers().stream()
-                        .map(Player::getName)
-                        .filter(n -> n.toLowerCase().startsWith(args[0].toLowerCase()))
-                        .collect(Collectors.toList());
-            }
-            return Collections.emptyList();
+        public List<String> onTabComplete(CommandSender s, Command c, String alias, String[] a) {
+            return tabPlayers(s, a);
         }
     }
 
-    private class TpahereCmd implements CommandExecutor, TabCompleter {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
+    class TpahereCmd implements CommandExecutor, TabCompleter {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!(s instanceof Player p)) { s.sendMessage(msg("player-only")); return true; }
             if (!p.hasPermission("megaplugin.tpa")) { p.sendMessage(msg("no-permission")); return true; }
-            if (args.length == 0) { p.sendMessage(msg("prefix") + " §c用法: /tpahere <玩家>"); return true; }
-            Player target = plugin.getServer().getPlayer(args[0]);
-            if (target == null) { p.sendMessage(msg("player-not-found")); return true; }
-            if (target.equals(p)) { p.sendMessage(msg("prefix") + " §c你不能传送自己！"); return true; }
-
+            if (a.length == 0) { p.sendMessage(msg("prefix") + " §c用法: /tpahere <玩家>"); return true; }
+            Player t = plugin.getServer().getPlayer(a[0]);
+            if (t == null || t == p) { p.sendMessage(msg("prefix") + " §c目标无效！"); return true; }
             int timeout = plugin.getConfig().getInt("teleport.request-timeout", 60);
-            requests.put(target.getUniqueId(), new TeleportRequest(p.getUniqueId(), target.getUniqueId(), true, System.currentTimeMillis() + timeout * 1000L));
-
-            p.sendMessage(msg("prefix") + " §a传送请求已发送给 §e" + target.getName());
-            sendClickableRequest(p, target, true, timeout);
+            requests.put(t.getUniqueId(), new TeleportRequest(p.getUniqueId(), t.getUniqueId(), true, System.currentTimeMillis() + timeout * 1000L));
+            p.sendMessage(msg("prefix") + " §a请求已发送给 §e" + t.getName());
+            sendClickable(p, t, true);
             return true;
         }
-
-        @Override
-        public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
-            if (args.length == 1) {
-                return plugin.getServer().getOnlinePlayers().stream()
-                        .map(Player::getName)
-                        .filter(n -> n.toLowerCase().startsWith(args[0].toLowerCase()))
-                        .collect(Collectors.toList());
-            }
-            return Collections.emptyList();
+        public List<String> onTabComplete(CommandSender s, Command c, String alias, String[] a) {
+            return tabPlayers(s, a);
         }
     }
 
-    private class TpacceptCmd implements CommandExecutor {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
-            TeleportRequest req = requests.remove(p.getUniqueId());
-            if (req == null || req.time() < System.currentTimeMillis()) {
-                p.sendMessage(msg("prefix") + " §c没有待处理的传送请求！"); return true;
+    class TpacceptCmd implements CommandExecutor {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!(s instanceof Player p)) { s.sendMessage(msg("player-only")); return true; }
+            var req = requests.remove(p.getUniqueId());
+            if (req == null || System.currentTimeMillis() > req.expire) {
+                p.sendMessage(msg("prefix") + " §c没有待处理的请求！"); return true;
             }
-            Player requester = plugin.getServer().getPlayer(req.requester());
-            if (requester == null) { p.sendMessage(msg("prefix") + " §c请求者已离线！"); return true; }
-
-            if (req.here()) {
-                p.teleport(requester.getLocation());
-                p.sendMessage(msg("prefix") + " §a已传送到 §e" + requester.getName());
-                requester.sendMessage(msg("prefix") + " §e" + p.getName() + " §a接受了你的传送请求！");
-            } else {
-                requester.teleport(p.getLocation());
-                requester.sendMessage(msg("prefix") + " §a已传送到 §e" + p.getName());
-                p.sendMessage(msg("prefix") + " §a已接受来自 §e" + requester.getName() + " §a的传送");
-            }
+            Player r = plugin.getServer().getPlayer(req.requester);
+            if (r == null) { p.sendMessage(msg("prefix") + " §c请求者已离线！"); return true; }
+            if (req.here) { p.teleport(r); p.sendMessage(msg("prefix") + " §a已传送到 §e" + r.getName()); }
+            else { r.teleport(p); r.sendMessage(msg("prefix") + " §a已传送到 §e" + p.getName()); }
             return true;
         }
     }
 
-    private class TpdenyCmd implements CommandExecutor {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
-            TeleportRequest req = requests.remove(p.getUniqueId());
-            if (req == null || req.time() < System.currentTimeMillis()) {
-                p.sendMessage(msg("prefix") + " §c没有待处理的传送请求！"); return true;
-            }
-            Player requester = plugin.getServer().getPlayer(req.requester());
-            p.sendMessage(msg("prefix") + " §c传送请求已拒绝。");
-            if (requester != null) requester.sendMessage(msg("prefix") + " §c" + p.getName() + " 拒绝了你的传送请求。");
+    class TpdenyCmd implements CommandExecutor {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!(s instanceof Player p)) { s.sendMessage(msg("player-only")); return true; }
+            var req = requests.remove(p.getUniqueId());
+            if (req == null) { p.sendMessage(msg("prefix") + " §c没有待处理的请求！"); return true; }
+            Player r = plugin.getServer().getPlayer(req.requester);
+            if (r != null) r.sendMessage(msg("prefix") + " §c" + p.getName() + " 拒绝了你的请求。");
+            p.sendMessage(msg("prefix") + " §c已拒绝。");
             return true;
         }
     }
 
-    private class TpCmd implements CommandExecutor, TabCompleter {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
+    class TpCmd implements CommandExecutor, TabCompleter {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!(s instanceof Player p)) { s.sendMessage(msg("player-only")); return true; }
             if (!p.hasPermission("megaplugin.tp")) { p.sendMessage(msg("no-permission")); return true; }
-            if (args.length == 0) { p.sendMessage(msg("prefix") + " §c用法: /tp <玩家>"); return true; }
-            Player target = plugin.getServer().getPlayer(args[0]);
-            if (target == null) { p.sendMessage(msg("player-not-found")); return true; }
-            p.teleport(target);
-            p.sendMessage(msg("prefix") + " §a已传送到 §e" + target.getName());
+            if (a.length == 0) { p.sendMessage(msg("prefix") + " §c用法: /tp <玩家>"); return true; }
+            Player t = plugin.getServer().getPlayer(a[0]);
+            if (t == null) { p.sendMessage(msg("player-not-found")); return true; }
+            p.teleport(t);
             return true;
         }
-
-        @Override
-        public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
-            if (args.length == 1) {
-                return plugin.getServer().getOnlinePlayers().stream()
-                        .map(Player::getName)
-                        .filter(n -> n.toLowerCase().startsWith(args[0].toLowerCase()))
-                        .collect(Collectors.toList());
-            }
-            return Collections.emptyList();
+        public List<String> onTabComplete(CommandSender s, Command c, String alias, String[] a) {
+            return tabPlayers(s, a);
         }
     }
 
-    private class TphereCmd implements CommandExecutor, TabCompleter {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
+    class TphereCmd implements CommandExecutor, TabCompleter {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!(s instanceof Player p)) { s.sendMessage(msg("player-only")); return true; }
             if (!p.hasPermission("megaplugin.tp")) { p.sendMessage(msg("no-permission")); return true; }
-            if (args.length == 0) { p.sendMessage(msg("prefix") + " §c用法: /tphere <玩家>"); return true; }
-            Player target = plugin.getServer().getPlayer(args[0]);
-            if (target == null) { p.sendMessage(msg("player-not-found")); return true; }
-            target.teleport(p);
-            p.sendMessage(msg("prefix") + " §a已将 §e" + target.getName() + " §a传送到你身边。");
-            target.sendMessage(msg("prefix") + " §a你被传送到 §e" + p.getName());
+            if (a.length == 0) { p.sendMessage(msg("prefix") + " §c用法: /tphere <玩家>"); return true; }
+            Player t = plugin.getServer().getPlayer(a[0]);
+            if (t == null) { p.sendMessage(msg("player-not-found")); return true; }
+            t.teleport(p);
+            p.sendMessage(msg("prefix") + " §a已将 §e" + t.getName() + " §a传送过来");
             return true;
         }
-
-        @Override
-        public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
-            if (args.length == 1) {
-                return plugin.getServer().getOnlinePlayers().stream()
-                        .map(Player::getName)
-                        .filter(n -> n.toLowerCase().startsWith(args[0].toLowerCase()))
-                        .collect(Collectors.toList());
-            }
-            return Collections.emptyList();
+        public List<String> onTabComplete(CommandSender s, Command c, String alias, String[] a) {
+            return tabPlayers(s, a);
         }
     }
 
-    private class TpoCmd implements CommandExecutor, TabCompleter {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
+    class TpoCmd implements CommandExecutor, TabCompleter {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!(s instanceof Player p)) { s.sendMessage(msg("player-only")); return true; }
             if (!p.hasPermission("megaplugin.tp")) { p.sendMessage(msg("no-permission")); return true; }
-            if (args.length == 0) { p.sendMessage(msg("prefix") + " §c用法: /tpo <玩家>"); return true; }
-            Player target = plugin.getServer().getPlayer(args[0]);
-            if (target == null) { p.sendMessage(msg("player-not-found")); return true; }
-            p.teleport(target);
-            p.sendMessage(msg("prefix") + " §a已强制传送到 §e" + target.getName());
+            if (a.length == 0) { p.sendMessage(msg("prefix") + " §c用法: /tpo <玩家>"); return true; }
+            Player t = plugin.getServer().getPlayer(a[0]);
+            if (t == null) { p.sendMessage(msg("player-not-found")); return true; }
+            p.teleport(t);
             return true;
         }
-
-        @Override
-        public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
-            if (args.length == 1) {
-                return plugin.getServer().getOnlinePlayers().stream()
-                        .map(Player::getName)
-                        .filter(n -> n.toLowerCase().startsWith(args[0].toLowerCase()))
-                        .collect(Collectors.toList());
-            }
-            return Collections.emptyList();
+        public List<String> onTabComplete(CommandSender s, Command c, String alias, String[] a) {
+            return tabPlayers(s, a);
         }
     }
 
-    private class BackCmd implements CommandExecutor {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
+    class BackCmd implements CommandExecutor {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!(s instanceof Player p)) { s.sendMessage(msg("player-only")); return true; }
             if (!p.hasPermission("megaplugin.back")) { p.sendMessage(msg("no-permission")); return true; }
             Location loc = lastLocation.get(p.getUniqueId());
-            if (loc == null) { p.sendMessage(msg("prefix") + " §c没有找到之前的位置记录！"); return true; }
+            if (loc == null) { p.sendMessage(msg("prefix") + " §c没有可返回的位置！"); return true; }
             p.teleport(loc);
-            p.sendMessage(msg("prefix") + " §a已返回之前的位置。");
+            p.sendMessage(msg("prefix") + " §a已返回！");
             return true;
         }
+    }
+
+    private List<String> tabPlayers(CommandSender s, String[] a) {
+        if (a.length == 1)
+            return plugin.getServer().getOnlinePlayers().stream()
+                    .map(Player::getName)
+                    .filter(n -> n.toLowerCase().startsWith(a[0].toLowerCase()))
+                    .toList();
+        return List.of();
     }
 }

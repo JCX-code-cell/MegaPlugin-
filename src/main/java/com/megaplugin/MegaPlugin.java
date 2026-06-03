@@ -10,64 +10,59 @@ public final class MegaPlugin extends JavaPlugin {
 
     private final List<MegaModule> modules = new ArrayList<>();
 
-    // Module instances for easy access
-    private TeleportModule teleportModule;
     private EconomyModule economyModule;
+    private TeleportModule teleportModule;
     private PunishModule punishModule;
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
 
-        // Register modules
-        registerModule(new HomeModule(this));
-        registerModule(new WarpModule(this));
-        teleportModule = registerModule(new TeleportModule(this));
-        registerModule(new SpawnModule(this));
-        economyModule = registerModule(new EconomyModule(this));
-        registerModule(new AdminModule(this));
-        registerModule(new ChatModule(this));
-        registerModule(new KitModule(this));
-        registerModule(new MenuModule(this));
-        registerModule(new BindModule(this));
-        registerModule(new MarketModule(this));
-        registerModule(new AuthModule(this));
-        registerModule(new RTPModule(this));
-        punishModule = registerModule(new PunishModule(this));
-        registerModule(new GrimBridgeModule(this));
-        registerModule(new ClaimModule(this));
+        register(teleportModule   = new TeleportModule(this));
+        register(economyModule    = new EconomyModule(this));
+        register(punishModule     = new PunishModule(this));
+        register(new SpawnModule(this));
+        register(new HomeModule(this));
+        register(new WarpModule(this));
+        register(new AdminModule(this));
+        register(new ChatModule(this));
+        register(new KitModule(this));
+        register(new MenuModule(this));
+        register(new BindModule(this));
+        register(new MarketModule(this));
+        register(new AuthModule(this));
+        register(new RTPModule(this));
+        register(new GrimBridgeModule(this));
+        register(new ClaimModule(this));
 
-        getLogger().info("MegaPlugin v1.0.0 enabled! " + modules.size() + " modules loaded.");
+        getLogger().info("[MegaPlugin] v" + getDescription().getVersion() +
+                " 已加载 " + modules.size() + " 个模块");
     }
 
     @Override
     public void onDisable() {
-        for (MegaModule module : modules) {
-            try {
-                module.onDisable();
-            } catch (Exception e) {
-                getLogger().warning("Error disabling module: " + e.getMessage());
-            }
+        for (MegaModule m : modules) {
+            try { m.onDisable(); }
+            catch (Exception e) { getLogger().warning("[MegaPlugin] 模块卸载异常: " + e.getMessage()); }
         }
         modules.clear();
-        getLogger().info("MegaPlugin disabled.");
     }
 
-    private <T extends MegaModule> T registerModule(T module) {
+    private <T extends MegaModule> T register(T module) {
         modules.add(module);
         module.onEnable();
         return module;
     }
 
-    public TeleportModule getTeleportModule() {
-        return teleportModule;
-    }
+    public EconomyModule economy() { return economyModule; }
+    public TeleportModule teleport() { return teleportModule; }
+    public PunishModule punish() { return punishModule; }
 
-    public EconomyModule getEconomyModule() {
-        return economyModule;
-    }
-
-    public PunishModule getPunishModule() {
-        return punishModule;
-    }
+    // 兼容旧 API (逐步移除)
+    /** @deprecated use economy() */
+    @Deprecated public EconomyModule getEconomyModule() { return economyModule; }
+    /** @deprecated use teleport() */
+    @Deprecated public TeleportModule getTeleportModule() { return teleportModule; }
+    /** @deprecated use punish() */
+    @Deprecated public PunishModule getPunishModule() { return punishModule; }
 }

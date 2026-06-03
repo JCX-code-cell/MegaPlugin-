@@ -3,266 +3,148 @@ package com.megaplugin.module;
 import com.megaplugin.MegaPlugin;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
-import org.bukkit.command.CommandSender;
-import org.bukkit.command.TabCompleter;
+import org.bukkit.command.*;
+import org.bukkit.entity.Damageable;
 import org.bukkit.entity.Player;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
+/**
+ * 管理工具模块 — /gmc /gms /gma /gmsp /fly /god /heal /feed /vanish /invsee
+ */
 public class AdminModule extends MegaModule {
 
-    public AdminModule(MegaPlugin plugin) {
-        super(plugin);
-    }
+    public AdminModule(MegaPlugin plugin) { super(plugin); }
 
     @Override
     public void onEnable() {
-        registerListener();
-        register("gmc", new GamemodeCmd(GameMode.CREATIVE));
-        register("gms", new GamemodeCmd(GameMode.SURVIVAL));
-        register("gma", new GamemodeCmd(GameMode.ADVENTURE));
-        register("gmsp", new GamemodeCmd(GameMode.SPECTATOR));
-        register("fly", new FlyCmd());
-        register("god", new GodCmd());
-        register("heal", new HealCmd());
-        register("feed", new FeedCmd());
-        register("vanish", new VanishCmd());
-        register("invsee", new InvseeCmd());
+        cmd("gmc",     p -> mode(p, GameMode.CREATIVE,   "megaplugin.admin"));
+        cmd("gms",     p -> mode(p, GameMode.SURVIVAL,   "megaplugin.admin"));
+        cmd("gma",     p -> mode(p, GameMode.ADVENTURE,  "megaplugin.admin"));
+        cmd("gmsp",    p -> mode(p, GameMode.SPECTATOR,  "megaplugin.admin"));
+        cmd("fly",     new FlyCmd());
+        cmd("god",     new GodCmd());
+        cmd("heal",    new HealCmd());
+        cmd("feed",    new FeedCmd());
+        cmd("vanish",  new VanishCmd());
+        cmd("invsee",  new InvseeCmd());
     }
 
-    @SuppressWarnings("deprecation")
-    private void register(String name, CommandExecutor executor) {
-        var cmd = plugin.getCommand(name);
-        if (cmd != null) {
-            cmd.setExecutor(executor);
-            if (executor instanceof TabCompleter t) cmd.setTabCompleter(t);
+    private void cmd(String name, CommandExecutor exe) {
+        var c = plugin.getCommand(name);
+        if (c != null) {
+            c.setExecutor(exe);
+            if (exe instanceof TabCompleter t) c.setTabCompleter(t);
         }
     }
 
-    private class GamemodeCmd implements CommandExecutor, TabCompleter {
-        private final GameMode mode;
+    // 简化的单玩家操作 lambda
+    private void mode(Player p, GameMode gm, String perm) {
+        if (!p.hasPermission(perm)) { p.sendMessage(msg("no-permission")); return; }
+        p.setGameMode(gm);
+        p.sendMessage(msg("prefix") + " §a已切换为 " + gm.name());
+    }
 
-        GamemodeCmd(GameMode mode) { this.mode = mode; }
-
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!sender.hasPermission("megaplugin.admin")) { sender.sendMessage(msg("no-permission")); return true; }
-
-            if (args.length > 0) {
-                Player target = plugin.getServer().getPlayer(args[0]);
-                if (target == null) { sender.sendMessage(msg("player-not-found")); return true; }
-                target.setGameMode(mode);
-                target.sendMessage(msg("prefix") + " §a游戏模式已设置为 §e" + mode.name());
-                sender.sendMessage(msg("prefix") + " §a将 §e" + target.getName() + " §a的游戏模式设置为 §e" + mode.name());
-            } else {
-                if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
-                p.setGameMode(mode);
-                p.sendMessage(msg("prefix") + " §a游戏模式已设置为 §e" + mode.name());
-            }
+    // ── 命令 ──
+    class FlyCmd implements CommandExecutor, TabCompleter {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!s.hasPermission("megaplugin.admin")) { s.sendMessage(msg("no-permission")); return true; }
+            Player t = a.length > 0 ? Bukkit.getPlayer(a[0]) : (s instanceof Player p ? p : null);
+            if (t == null) { s.sendMessage(msg("player-not-found")); return true; }
+            t.setAllowFlight(!t.getAllowFlight());
+            t.sendMessage(msg("prefix") + " §a飞行: " + (t.getAllowFlight() ? "§2开启" : "§c关闭"));
             return true;
         }
-
-        @Override
-        public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
-            if (args.length == 1) {
-                return plugin.getServer().getOnlinePlayers().stream()
-                        .map(Player::getName)
-                        .filter(n -> n.toLowerCase().startsWith(args[0].toLowerCase()))
-                        .collect(Collectors.toList());
-            }
-            return Collections.emptyList();
+        public List<String> onTabComplete(CommandSender s, Command c, String alias, String[] a) {
+            return tabPlayers(a);
         }
     }
 
-    private class FlyCmd implements CommandExecutor, TabCompleter {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!sender.hasPermission("megaplugin.admin")) { sender.sendMessage(msg("no-permission")); return true; }
-
-            if (args.length > 0) {
-                Player target = plugin.getServer().getPlayer(args[0]);
-                if (target == null) { sender.sendMessage(msg("player-not-found")); return true; }
-                target.setAllowFlight(!target.getAllowFlight());
-                String status = target.getAllowFlight() ? "§a已开启" : "§c已关闭";
-                target.sendMessage(msg("prefix") + " §a飞行模式 " + status);
-                sender.sendMessage(msg("prefix") + " §a飞行模式 " + status + " §a对 §e" + target.getName());
-            } else {
-                if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
-                p.setAllowFlight(!p.getAllowFlight());
-                String status = p.getAllowFlight() ? "§a已开启" : "§c已关闭";
-                p.sendMessage(msg("prefix") + " §a飞行模式 " + status);
-            }
+    class GodCmd implements CommandExecutor, TabCompleter {
+        private final Set<UUID> gods = new HashSet<>();
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!s.hasPermission("megaplugin.admin")) { s.sendMessage(msg("no-permission")); return true; }
+            Player t = a.length > 0 ? Bukkit.getPlayer(a[0]) : (s instanceof Player p ? p : null);
+            if (t == null) { s.sendMessage(msg("player-not-found")); return true; }
+            boolean on = !gods.contains(t.getUniqueId());
+            if (on) gods.add(t.getUniqueId()); else gods.remove(t.getUniqueId());
+            t.setInvulnerable(on);
+            t.sendMessage(msg("prefix") + " §a无敌: " + (on ? "§2开启" : "§c关闭"));
             return true;
         }
-
-        @Override
-        public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
-            if (args.length == 1) return getPlayerNames(args[0]);
-            return Collections.emptyList();
+        public List<String> onTabComplete(CommandSender s, Command c, String alias, String[] a) {
+            return tabPlayers(a);
         }
     }
 
-    private class GodCmd implements CommandExecutor, TabCompleter {
-        private final Set<UUID> godded = new HashSet<>();
-
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!sender.hasPermission("megaplugin.admin")) { sender.sendMessage(msg("no-permission")); return true; }
-
-            if (args.length > 0) {
-                Player target = plugin.getServer().getPlayer(args[0]);
-                if (target == null) { sender.sendMessage(msg("player-not-found")); return true; }
-                toggleGod(target, sender);
-            } else {
-                if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
-                toggleGod(p, sender);
-            }
+    class HealCmd implements CommandExecutor, TabCompleter {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!s.hasPermission("megaplugin.admin")) { s.sendMessage(msg("no-permission")); return true; }
+            Player t = a.length > 0 ? Bukkit.getPlayer(a[0]) : (s instanceof Player p ? p : null);
+            if (t == null) { s.sendMessage(msg("player-not-found")); return true; }
+            if (t instanceof Damageable d) d.setHealth(d.getMaxHealth());
+            t.setFoodLevel(20);
+            t.setFireTicks(0);
+            t.sendMessage(msg("prefix") + " §a已治疗！");
             return true;
         }
-
-        private void toggleGod(Player target, CommandSender sender) {
-            if (godded.contains(target.getUniqueId())) {
-                godded.remove(target.getUniqueId());
-                target.setInvulnerable(false);
-                target.sendMessage(msg("prefix") + " §c无敌模式已关闭！");
-                if (!target.equals(sender)) sender.sendMessage(msg("prefix") + " §c已关闭 §e" + target.getName() + " §c的无敌模式");
-            } else {
-                godded.add(target.getUniqueId());
-                target.setInvulnerable(true);
-                target.sendMessage(msg("prefix") + " §a无敌模式已开启！");
-                if (!target.equals(sender)) sender.sendMessage(msg("prefix") + " §a已开启 §e" + target.getName() + " §a的无敌模式");
-            }
-        }
-
-        @Override
-        public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
-            if (args.length == 1) return getPlayerNames(args[0]);
-            return Collections.emptyList();
+        public List<String> onTabComplete(CommandSender s, Command c, String alias, String[] a) {
+            return tabPlayers(a);
         }
     }
 
-    private class HealCmd implements CommandExecutor, TabCompleter {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!sender.hasPermission("megaplugin.admin")) { sender.sendMessage(msg("no-permission")); return true; }
-
-            if (args.length > 0) {
-                Player target = plugin.getServer().getPlayer(args[0]);
-                if (target == null) { sender.sendMessage(msg("player-not-found")); return true; }
-                target.setHealth(target.getMaxHealth());
-                target.sendMessage(msg("prefix") + " §a你已被治愈！");
-                sender.sendMessage(msg("prefix") + " §a治愈了 §e" + target.getName());
-            } else {
-                if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
-                p.setHealth(p.getMaxHealth());
-                p.sendMessage(msg("prefix") + " §a你已被治愈！");
-            }
+    class FeedCmd implements CommandExecutor, TabCompleter {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!s.hasPermission("megaplugin.admin")) { s.sendMessage(msg("no-permission")); return true; }
+            Player t = a.length > 0 ? Bukkit.getPlayer(a[0]) : (s instanceof Player p ? p : null);
+            if (t == null) { s.sendMessage(msg("player-not-found")); return true; }
+            t.setFoodLevel(20);
+            t.sendMessage(msg("prefix") + " §a已喂饱！");
             return true;
         }
-
-        @Override
-        public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
-            if (args.length == 1) return getPlayerNames(args[0]);
-            return Collections.emptyList();
+        public List<String> onTabComplete(CommandSender s, Command c, String alias, String[] a) {
+            return tabPlayers(a);
         }
     }
 
-    private class FeedCmd implements CommandExecutor, TabCompleter {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!sender.hasPermission("megaplugin.admin")) { sender.sendMessage(msg("no-permission")); return true; }
-
-            if (args.length > 0) {
-                Player target = plugin.getServer().getPlayer(args[0]);
-                if (target == null) { sender.sendMessage(msg("player-not-found")); return true; }
-                target.setFoodLevel(20);
-                target.setSaturation(20);
-                target.sendMessage(msg("prefix") + " §a你已被喂饱！");
-                sender.sendMessage(msg("prefix") + " §a喂饱了 §e" + target.getName());
-            } else {
-                if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
-                p.setFoodLevel(20);
-                p.setSaturation(20);
-                p.sendMessage(msg("prefix") + " §a你已被喂饱！");
-            }
-            return true;
-        }
-
-        @Override
-        public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
-            if (args.length == 1) return getPlayerNames(args[0]);
-            return Collections.emptyList();
-        }
-    }
-
-    private class VanishCmd implements CommandExecutor, TabCompleter {
+    class VanishCmd implements CommandExecutor, TabCompleter {
         private final Set<UUID> vanished = new HashSet<>();
-
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!sender.hasPermission("megaplugin.admin")) { sender.sendMessage(msg("no-permission")); return true; }
-
-            if (args.length > 0) {
-                Player target = plugin.getServer().getPlayer(args[0]);
-                if (target == null) { sender.sendMessage(msg("player-not-found")); return true; }
-                toggleVanish(target, sender);
-            } else {
-                if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
-                toggleVanish(p, sender);
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!s.hasPermission("megaplugin.admin")) { s.sendMessage(msg("no-permission")); return true; }
+            Player t = a.length > 0 ? Bukkit.getPlayer(a[0]) : (s instanceof Player p ? p : null);
+            if (t == null) { s.sendMessage(msg("player-not-found")); return true; }
+            boolean on = !vanished.contains(t.getUniqueId());
+            if (on) vanished.add(t.getUniqueId()); else vanished.remove(t.getUniqueId());
+            for (Player o : Bukkit.getOnlinePlayers()) {
+                if (on) o.hidePlayer(plugin, t); else o.showPlayer(plugin, t);
             }
+            t.sendMessage(msg("prefix") + " §a隐身: " + (on ? "§2开启" : "§c关闭"));
             return true;
         }
-
-        private void toggleVanish(Player target, CommandSender sender) {
-            String name = target.getName();
-            if (vanished.contains(target.getUniqueId())) {
-                vanished.remove(target.getUniqueId());
-                for (Player online : Bukkit.getOnlinePlayers()) online.showPlayer(plugin, target);
-                target.sendMessage(msg("prefix") + " §7你现在可见！");
-                if (!target.equals(sender)) sender.sendMessage(msg("prefix") + " §7" + name + " 现在可见。");
-            } else {
-                vanished.add(target.getUniqueId());
-                for (Player online : Bukkit.getOnlinePlayers()) {
-                    if (!online.hasPermission("megaplugin.admin")) online.hidePlayer(plugin, target);
-                }
-                target.sendMessage(msg("prefix") + " §7你现在隐身了！");
-                if (!target.equals(sender)) sender.sendMessage(msg("prefix") + " §7" + name + " 现在隐身了。");
-            }
-        }
-
-        @Override
-        public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
-            if (args.length == 1) return getPlayerNames(args[0]);
-            return Collections.emptyList();
+        public List<String> onTabComplete(CommandSender s, Command c, String alias, String[] a) {
+            return tabPlayers(a);
         }
     }
 
-    private class InvseeCmd implements CommandExecutor, TabCompleter {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
+    class InvseeCmd implements CommandExecutor, TabCompleter {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!(s instanceof Player p)) { s.sendMessage(msg("player-only")); return true; }
             if (!p.hasPermission("megaplugin.admin")) { p.sendMessage(msg("no-permission")); return true; }
-            if (args.length == 0) { p.sendMessage(msg("prefix") + " §c用法: /invsee <玩家>"); return true; }
-            Player target = plugin.getServer().getPlayer(args[0]);
-            if (target == null) { p.sendMessage(msg("player-not-found")); return true; }
-            p.openInventory(target.getInventory());
+            if (a.length == 0) { p.sendMessage(msg("prefix") + " §c用法: /invsee <玩家>"); return true; }
+            Player t = Bukkit.getPlayer(a[0]);
+            if (t == null) { p.sendMessage(msg("player-not-found")); return true; }
+            p.openInventory(t.getInventory());
             return true;
         }
-
-        @Override
-        public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
-            if (args.length == 1) return getPlayerNames(args[0]);
-            return Collections.emptyList();
+        public List<String> onTabComplete(CommandSender s, Command c, String alias, String[] a) {
+            return tabPlayers(a);
         }
     }
 
-    private List<String> getPlayerNames(String prefix) {
-        return plugin.getServer().getOnlinePlayers().stream()
-                .map(Player::getName)
-                .filter(n -> n.toLowerCase().startsWith(prefix.toLowerCase()))
-                .collect(Collectors.toList());
+    private List<String> tabPlayers(String[] a) {
+        if (a.length == 1)
+            return Bukkit.getOnlinePlayers().stream()
+                    .map(Player::getName).filter(n -> n.toLowerCase().startsWith(a[0].toLowerCase())).toList();
+        return List.of();
     }
 }

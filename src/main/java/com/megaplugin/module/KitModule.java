@@ -3,261 +3,205 @@ package com.megaplugin.module;
 import com.megaplugin.MegaPlugin;
 import com.megaplugin.util.DataFile;
 import org.bukkit.Material;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
-import org.bukkit.command.CommandSender;
-import org.bukkit.command.TabCompleter;
+import org.bukkit.command.*;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.scheduler.BukkitRunnable;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
+/**
+ * 礼包模块 — /kit /kits /createkit /deletekit
+ */
 public class KitModule extends MegaModule {
 
-    private final DataFile kitData;
-    private final DataFile cooldownData;
+    private final DataFile kitData = new DataFile(plugin, "kits.yml");
+    private final DataFile cdData = new DataFile(plugin, "kit_cooldowns.yml");
     private final Map<String, KitInfo> kits = new HashMap<>();
     private final Map<UUID, Map<String, Long>> cooldowns = new HashMap<>();
 
-    public KitModule(MegaPlugin plugin) {
-        super(plugin);
-        kitData = new DataFile(plugin, "kits.yml");
-        cooldownData = new DataFile(plugin, "kit_cooldowns.yml");
-    }
+    public KitModule(MegaPlugin plugin) { super(plugin); }
 
     @Override
     public void onEnable() {
-        registerListener();
-        register("kit", new KitCmd());
-        register("kits", new KitsCmd());
-        register("createkit", new CreatekitCmd());
-        register("deletekit", new DeletekitCmd());
+        listen();
+        cmd("kit", new KitCmd());
+        cmd("kits", new KitsCmd());
+        cmd("createkit", new CreatekitCmd());
+        cmd("deletekit", new DeletekitCmd());
 
-        // Load kits
-        for (String kitName : kitData.getConfig().getKeys(false)) {
+        // 加载礼包
+        for (String name : kitData.getConfig().getKeys(false)) {
             try {
-                var section = kitData.getConfig().getConfigurationSection(kitName);
-                if (section != null) {
-                    String name = section.getString("name", kitName);
-                    int cooldown = section.getInt("cooldown", 0);
-                    List<ItemStack> items = (List<ItemStack>) section.getList("items");
-                    if (items != null) {
-                        kits.put(kitName.toLowerCase(), new KitInfo(name, cooldown, items));
-                    }
-                }
+                var sec = kitData.getConfig().getConfigurationSection(name);
+                if (sec == null) continue;
+                String display = sec.getString("name", name);
+                int cd = sec.getInt("cooldown", 0);
+                @SuppressWarnings("unchecked")
+                var items = (List<ItemStack>) sec.getList("items");
+                if (items != null) kits.put(name.toLowerCase(), new KitInfo(display, cd, items));
             } catch (Exception e) {
-                plugin.getLogger().warning("Failed to load kit: " + kitName);
+                plugin.getLogger().warning("[Kit] 加载失败: " + name);
             }
         }
 
-        // Load cooldowns
-        for (String key : cooldownData.getConfig().getKeys(false)) {
+        // 加载冷却
+        for (String k : cdData.getConfig().getKeys(false)) {
             try {
-                UUID uuid = UUID.fromString(key);
-                var section = cooldownData.getConfig().getConfigurationSection(key);
-                if (section != null) {
-                    Map<String, Long> playerCd = new HashMap<>();
-                    for (String kit : section.getKeys(false)) {
-                        long time = section.getLong(kit, 0);
-                        if (time > System.currentTimeMillis()) playerCd.put(kit, time);
-                    }
-                    if (!playerCd.isEmpty()) cooldowns.put(uuid, playerCd);
+                UUID id = UUID.fromString(k);
+                var sec = cdData.getConfig().getConfigurationSection(k);
+                if (sec == null) continue;
+                Map<String, Long> map = new HashMap<>();
+                for (String kit : sec.getKeys(false)) {
+                    long t = sec.getLong(kit, 0);
+                    if (t > System.currentTimeMillis()) map.put(kit, t);
                 }
+                if (!map.isEmpty()) cooldowns.put(id, map);
             } catch (Exception ignored) {}
         }
 
-        // Periodic cooldown save
-        new BukkitRunnable() {
-            @Override
-            public void run() { saveCooldowns(); }
-        }.runTaskTimer(plugin, 1200L, 1200L); // Every 60 seconds
+        new BukkitRunnable() { public void run() { saveCooldowns(); } }
+                .runTaskTimer(plugin, 1200L, 1200L);
     }
 
     @Override
     public void onDisable() {
         saveKits();
         saveCooldowns();
+        super.onDisable();
     }
 
+    @EventHandler
+    public void onQuit(PlayerQuitEvent e) { cooldowns.remove(e.getPlayer().getUniqueId()); }
+
     private void saveKits() {
-        for (var entry : kits.entrySet()) {
-            String path = entry.getKey();
-            kitData.getConfig().set(path + ".name", entry.getValue().name);
-            kitData.getConfig().set(path + ".cooldown", entry.getValue().cooldown);
-            kitData.getConfig().set(path + ".items", entry.getValue().items);
+        for (var e : kits.entrySet()) {
+            String p = e.getKey();
+            kitData.getConfig().set(p + ".name", e.getValue().name);
+            kitData.getConfig().set(p + ".cooldown", e.getValue().cooldown);
+            kitData.getConfig().set(p + ".items", e.getValue().items);
         }
         kitData.save();
     }
 
     private void saveCooldowns() {
-        for (var entry : cooldowns.entrySet()) {
-            String path = entry.getKey().toString();
-            for (var kitEntry : entry.getValue().entrySet()) {
-                if (kitEntry.getValue() > System.currentTimeMillis()) {
-                    cooldownData.getConfig().set(path + "." + kitEntry.getKey(), kitEntry.getValue());
-                }
-            }
+        for (var e : cooldowns.entrySet()) {
+            String p = e.getKey().toString();
+            for (var ke : e.getValue().entrySet())
+                if (ke.getValue() > System.currentTimeMillis())
+                    cdData.getConfig().set(p + "." + ke.getKey(), ke.getValue());
         }
-        cooldownData.save();
+        cdData.save();
     }
 
-    @SuppressWarnings("deprecation")
-    private void register(String name, CommandExecutor executor) {
-        var cmd = plugin.getCommand(name);
-        if (cmd != null) {
-            cmd.setExecutor(executor);
-            if (executor instanceof TabCompleter t) cmd.setTabCompleter(t);
+    private void cmd(String name, CommandExecutor exe) {
+        var c = plugin.getCommand(name);
+        if (c != null) {
+            c.setExecutor(exe);
+            if (exe instanceof TabCompleter t) c.setTabCompleter(t);
         }
     }
 
     private record KitInfo(String name, int cooldown, List<ItemStack> items) {}
 
-    private class KitCmd implements CommandExecutor, TabCompleter {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
+    class KitCmd implements CommandExecutor, TabCompleter {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!(s instanceof Player p)) { s.sendMessage(msg("player-only")); return true; }
             if (!p.hasPermission("megaplugin.kit")) { p.sendMessage(msg("no-permission")); return true; }
-
-            if (args.length == 0) {
+            if (a.length == 0) {
                 p.sendMessage(msg("prefix") + " §7可用礼包: §e" +
-                        kits.keySet().stream().collect(Collectors.joining("§7, §e")));
+                        String.join("§7, §e", kits.keySet()));
+                return true;
+            }
+            String name = a[0].toLowerCase();
+            var kit = kits.get(name);
+            if (kit == null) { p.sendMessage(msg("prefix") + " §c礼包不存在！"); return true; }
+
+            // 冷却检查
+            var cd = cooldowns.getOrDefault(p.getUniqueId(), Map.of());
+            if (cd.containsKey(name) && cd.get(name) > System.currentTimeMillis()) {
+                long sec = (cd.get(name) - System.currentTimeMillis()) / 1000;
+                p.sendMessage(msg("prefix") + " §c冷却中！剩余 §e" + sec + "秒");
                 return true;
             }
 
-            String kitName = args[0].toLowerCase();
-            KitInfo kit = kits.get(kitName);
-            if (kit == null) { p.sendMessage(msg("prefix") + " §c礼包不存在: " + args[0]); return true; }
-
-            // Check cooldown
-            Map<String, Long> playerCd = cooldowns.getOrDefault(p.getUniqueId(), Collections.emptyMap());
-            if (playerCd.containsKey(kitName)) {
-                long remaining = playerCd.get(kitName) - System.currentTimeMillis();
-                if (remaining > 0) {
-                    long seconds = remaining / 1000;
-                    p.sendMessage(msg("prefix") + " §c冷却中！请等待 §e" + seconds + "秒 §c后才能再次领取此礼包。");
-                    return true;
-                }
+            for (var item : kit.items) {
+                var leftover = p.getInventory().addItem(item.clone());
+                for (var left : leftover.values())
+                    p.getWorld().dropItemNaturally(p.getLocation(), left);
             }
 
-            // Give items
-            PlayerInventory inv = p.getInventory();
-            for (ItemStack item : kit.items) {
-                ItemStack clone = item.clone();
-                HashMap<Integer, ItemStack> leftover = inv.addItem(clone);
-                if (!leftover.isEmpty()) {
-                    for (ItemStack left : leftover.values()) {
-                        p.getWorld().dropItemNaturally(p.getLocation(), left);
-                    }
-                }
-            }
-
-            // Set cooldown
-            if (kit.cooldown > 0) {
+            if (kit.cooldown > 0)
                 cooldowns.computeIfAbsent(p.getUniqueId(), k -> new HashMap<>())
-                        .put(kitName, System.currentTimeMillis() + kit.cooldown * 1000L);
-            }
+                        .put(name, System.currentTimeMillis() + kit.cooldown * 1000L);
 
-            p.sendMessage(msg("prefix") + " §a你领取了礼包: §e" + kit.name);
+            p.sendMessage(msg("prefix") + " §a已领取礼包 §e" + kit.name);
             return true;
         }
-
-        @Override
-        public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
-            if (args.length == 1) {
-                return kits.keySet().stream()
-                        .filter(k -> k.startsWith(args[0].toLowerCase()))
-                        .collect(Collectors.toList());
-            }
-            return Collections.emptyList();
+        public List<String> onTabComplete(CommandSender s, Command c, String alias, String[] a) {
+            if (a.length == 1) return kits.keySet().stream()
+                    .filter(k -> k.startsWith(a[0].toLowerCase())).toList();
+            return List.of();
         }
     }
 
-    private class KitsCmd implements CommandExecutor {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!sender.hasPermission("megaplugin.kit")) { sender.sendMessage(msg("no-permission")); return true; }
-            if (kits.isEmpty()) {
-                sender.sendMessage(msg("prefix") + " §7暂无可用礼包。");
-            } else {
-                List<String> kitList = new ArrayList<>();
-                for (var entry : kits.entrySet()) {
-                    String info = entry.getValue().name;
-                    if (entry.getValue().cooldown > 0) info += " §7(" + entry.getValue().cooldown + "秒冷却)";
-                    kitList.add(info);
-                }
-                sender.sendMessage(msg("prefix") + " §6可用礼包 §7("  + kits.size() + "):");
-                for (String s : kitList) sender.sendMessage(" §e- " + s);
+    class KitsCmd implements CommandExecutor {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!s.hasPermission("megaplugin.kit")) { s.sendMessage(msg("no-permission")); return true; }
+            if (kits.isEmpty()) { s.sendMessage(msg("prefix") + " §7暂无礼包。"); return true; }
+            s.sendMessage(msg("prefix") + " §6礼包列表 (" + kits.size() + "):");
+            for (var e : kits.entrySet()) {
+                String info = e.getValue().name;
+                if (e.getValue().cooldown > 0) info += " §7(" + e.getValue().cooldown + "秒冷却)";
+                s.sendMessage(" §e- " + info);
             }
             return true;
         }
     }
 
-    private class CreatekitCmd implements CommandExecutor, TabCompleter {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
+    class CreatekitCmd implements CommandExecutor, TabCompleter {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!(s instanceof Player p)) { s.sendMessage(msg("player-only")); return true; }
             if (!p.hasPermission("megaplugin.kit.admin")) { p.sendMessage(msg("no-permission")); return true; }
-            if (args.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /createkit <名字> <冷却秒数>"); return true; }
-
-            String name = args[0];
-            int cooldown;
-            try { cooldown = Integer.parseInt(args[1]); } catch (NumberFormatException e) {
-                p.sendMessage(msg("invalid-number")); return true;
-            }
-            if (cooldown < 0) cooldown = 0;
-
+            if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /createkit <名字> <冷却秒>"); return true; }
+            int cd;
+            try { cd = Integer.parseInt(a[1]); } catch (Exception ex) { p.sendMessage(msg("invalid-number")); return true; }
+            if (cd < 0) cd = 0;
             List<ItemStack> items = new ArrayList<>();
-            for (ItemStack item : p.getInventory().getContents()) {
+            for (var item : p.getInventory().getContents())
                 if (item != null && item.getType() != Material.AIR) items.add(item.clone());
-            }
-            for (ItemStack item : p.getInventory().getArmorContents()) {
+            for (var item : p.getInventory().getArmorContents())
                 if (item != null && item.getType() != Material.AIR) items.add(item.clone());
-            }
-            if (p.getInventory().getItemInOffHand().getType() != Material.AIR) {
+            if (p.getInventory().getItemInOffHand().getType() != Material.AIR)
                 items.add(p.getInventory().getItemInOffHand().clone());
-            }
-
-            kits.put(name.toLowerCase(), new KitInfo(name, cooldown, items));
+            kits.put(a[0].toLowerCase(), new KitInfo(a[0], cd, items));
             saveKits();
-            p.sendMessage(msg("prefix") + " §a礼包 §e" + name + " §a已创建，包含 §e" + items.size() + " §a个物品 §7(" + cooldown + "秒冷却)。");
+            p.sendMessage(msg("prefix") + " §a礼包已创建！§e" + items.size() + "§a件物品 §7(" + cd + "秒冷却)");
             return true;
         }
-
-        @Override
-        public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
-            if (args.length == 2) return Arrays.asList("0", "60", "300", "3600", "86400");
-            return Collections.emptyList();
+        public List<String> onTabComplete(CommandSender s, Command c, String alias, String[] a) {
+            if (a.length == 2) return List.of("0", "60", "300", "3600", "86400");
+            return List.of();
         }
     }
 
-    private class DeletekitCmd implements CommandExecutor, TabCompleter {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!sender.hasPermission("megaplugin.kit.admin")) { sender.sendMessage(msg("no-permission")); return true; }
-            if (args.length == 0) { sender.sendMessage(msg("prefix") + " §c用法: /deletekit <名字>"); return true; }
-
-            String name = args[0].toLowerCase();
-            if (kits.remove(name) != null) {
-                kitData.getConfig().set(name, null);
-                kitData.save();
-                sender.sendMessage(msg("prefix") + " §a礼包 §e" + args[0] + " §a已删除！");
-            } else {
-                sender.sendMessage(msg("prefix") + " §c礼包不存在: " + args[0]);
-            }
+    class DeletekitCmd implements CommandExecutor, TabCompleter {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!s.hasPermission("megaplugin.kit.admin")) { s.sendMessage(msg("no-permission")); return true; }
+            if (a.length == 0) { s.sendMessage(msg("prefix") + " §c用法: /deletekit <名字>"); return true; }
+            String n = a[0].toLowerCase();
+            if (kits.remove(n) != null) {
+                kitData.getConfig().set(n, null); kitData.save();
+                s.sendMessage(msg("prefix") + " §a礼包已删除！");
+            } else { s.sendMessage(msg("prefix") + " §c礼包不存在！"); }
             return true;
         }
-
-        @Override
-        public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
-            if (args.length == 1) {
-                return kits.keySet().stream()
-                        .filter(k -> k.startsWith(args[0].toLowerCase()))
-                        .collect(Collectors.toList());
-            }
-            return Collections.emptyList();
+        public List<String> onTabComplete(CommandSender s, Command c, String alias, String[] a) {
+            if (a.length == 1) return kits.keySet().stream()
+                    .filter(k -> k.startsWith(a[0].toLowerCase())).toList();
+            return List.of();
         }
     }
 }

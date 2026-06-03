@@ -1,14 +1,14 @@
 name: MegaPlugin
-version: "1.0.0"
+version: "2.0.0"
 main: com.megaplugin.MegaPlugin
 api-version: "1.21"
-description: A comprehensive plugin replacing CMI with homes, warps, tpa, economy, kits, admin tools and more.
-author: ServerAdmin
-website: https://github.com
+description: 全能型 Minecraft 服务端插件 — 家园/领地/经济/市场/传送/认证/管理
+author: JCX-code-cell
+website: https://github.com/JCX-code-cell/MegaPlugin-
 
 permissions:
   megaplugin.*:
-    description: All MegaPlugin permissions
+    description: 所有 MegaPlugin 权限
     default: op
     children:
       megaplugin.home: true
@@ -29,217 +29,86 @@ permissions:
       megaplugin.kit.admin: true
       megaplugin.market: true
       megaplugin.market.sell: true
+      megaplugin.claim: true
+      megaplugin.claim.admin: true
+      megaplugin.claim.flag: true
+      megaplugin.bind: true
+      megaplugin.punish: true
 
-  megaplugin.home:
-    default: true
-  megaplugin.home.other:
-    default: op
-  megaplugin.warp:
-    default: true
-  megaplugin.warp.admin:
-    default: op
-  megaplugin.tpa:
-    default: true
-  megaplugin.tp:
-    default: op
-  megaplugin.back:
-    default: true
-  megaplugin.spawn:
-    default: true
-  megaplugin.spawn.set:
-    default: op
-  megaplugin.economy:
-    default: true
-  megaplugin.economy.admin:
-    default: op
-  megaplugin.admin:
-    default: op
-  megaplugin.chat:
-    default: true
-  megaplugin.chat.admin:
-    default: op
-  megaplugin.kit:
-    default: true
-  megaplugin.kit.admin:
-    default: op
-  megaplugin.market:
-    default: true
-  megaplugin.market.sell:
-    default: true
-  megaplugin.claim.admin:
-    default: false
+  megaplugin.home: { default: true }
+  megaplugin.home.other: { default: op }
+  megaplugin.warp: { default: true }
+  megaplugin.warp.admin: { default: op }
+  megaplugin.tpa: { default: true }
+  megaplugin.tp: { default: op }
+  megaplugin.back: { default: true }
+  megaplugin.spawn: { default: true }
+  megaplugin.spawn.set: { default: op }
+  megaplugin.economy: { default: true }
+  megaplugin.economy.admin: { default: op }
+  megaplugin.admin: { default: op }
+  megaplugin.chat: { default: true }
+  megaplugin.chat.admin: { default: op }
+  megaplugin.kit: { default: true }
+  megaplugin.kit.admin: { default: op }
+  megaplugin.market: { default: true }
+  megaplugin.market.sell: { default: true }
+  megaplugin.claim: { default: true }
+  megaplugin.claim.admin: { default: op }
+  megaplugin.claim.flag: { default: false }
+  megaplugin.bind: { default: true }
+  megaplugin.punish: { default: op }
 
 commands:
-  sethome:
-    description: Set a home location
-    usage: /sethome <name>
-  home:
-    description: Teleport to a home
-    usage: /home [name]
-  delhome:
-    description: Delete a home
-    usage: /delhome <name>
-  homes:
-    description: List your homes
-    usage: /homes [player]
-  setwarp:
-    description: Set a warp location
-    usage: /setwarp <name>
-  warp:
-    description: Teleport to a warp
-    usage: /warp <name>
-  delwarp:
-    description: Delete a warp
-    usage: /delwarp <name>
-  warps:
-    description: List warps
-    usage: /warps
-  tpa:
-    description: Request teleport to a player
-    usage: /tpa <player>
-  tpahere:
-    description: Request player to teleport to you
-    usage: /tpahere <player>
-  tpaccept:
-    description: Accept a teleport request
-    usage: /tpaccept
-    aliases: [tpyes]
-  tpdeny:
-    description: Deny a teleport request
-    usage: /tpdeny
-    aliases: [tpno]
-  tp:
-    description: Teleport to a player
-    usage: /tp <player>
-  tphere:
-    description: Teleport a player to you
-    usage: /tphere <player>
-  tpo:
-    description: Force teleport (bypass restrictions)
-    usage: /tpo <player>
-  back:
-    description: Return to previous location
-    usage: /back
-  spawn:
-    description: Teleport to spawn
-    usage: /spawn
-  setspawn:
-    description: Set spawn location
-    usage: /setspawn
-  balance:
-    description: Check your balance
-    usage: /balance
-    aliases: [bal, money]
-  pay:
-    description: Pay a player
-    usage: /pay <player> <amount>
-  eco:
-    description: Manage economy
-    usage: /eco <give|take|set> <player> <amount>
-  baltop:
-    description: Top player balances
-    usage: /baltop [page]
-  gmc:
-    description: Creative mode
-    usage: /gmc [player]
-  gms:
-    description: Survival mode
-    usage: /gms [player]
-  gma:
-    description: Adventure mode
-    usage: /gma [player]
-  gmsp:
-    description: Spectator mode
-    usage: /gmsp [player]
-  fly:
-    description: Toggle flight mode
-    usage: /fly [player]
-  god:
-    description: Toggle god mode
-    usage: /god [player]
-  heal:
-    description: Heal a player
-    usage: /heal [player]
-  feed:
-    description: Feed a player
-    usage: /feed [player]
-  vanish:
-    description: Toggle vanish mode
-    usage: /vanish [player]
-    aliases: [v]
-  invsee:
-    description: View a player's inventory
-    usage: /invsee <player>
-  nick:
-    description: Set nickname
-    usage: /nick <name|reset> or /nick <player> <name|reset>
-  enderchest:
-    description: Open ender chest
-    usage: /enderchest [player]
-    aliases: [ec]
-  whois:
-    description: View player information
-    usage: /whois <player>
-  broadcast:
-    description: Broadcast a message
-    usage: /broadcast <message>
-    aliases: [bc]
-  kit:
-    description: Claim a kit
-    usage: /kit [name]
-  kits:
-    description: List available kits
-    usage: /kits
-  createkit:
-    description: Create a kit from inventory
-    usage: /createkit <name> <cooldown-seconds>
-  deletekit:
-    description: Delete a kit
-    usage: /deletekit <name>
-  menu:
-    description: Open server menu
-    usage: /menu
-    aliases: [cd]
-  bind:
-    description: Bind a command to held item
-    usage: /bind <command>
-  unbind:
-    description: Unbind command from held item
-    usage: /unbind
-  binds:
-    description: List your item bindings
-    usage: /binds
-  market:
-    description: Open player market
-    usage: /market [sell <price>|my]
-    aliases: [ah, shop]
-  register:
-    description: Register a new account
-    usage: /register <password> <confirm-password>
-    aliases: [reg]
-  login:
-    description: Login to your account
-    usage: /login <password>
-    aliases: [l]
-  changepassword:
-    description: Change your password
-    usage: /changepassword <old-password> <new-password>
-  rtp:
-    description: Random teleport
-    usage: /rtp
-    aliases: [randomtp, wild]
-  grimbridge:
-    description: GrimAC bridge management
-    usage: /grimbridge <status|reload|alerts|verbose|info>
-    aliases: [gb]
-  megapunish:
-    description: Progressive punishment tracker
-    usage: /megapunish <player> <checkType>
-  claim:
-    description: Land claim management
-    usage: /claim <create|trust|untrust|remove|list>
-    aliases: [claims]
-
-
-
-
+  sethome: { description: 设置家, usage: /sethome <名字> }
+  home: { description: 传送到家, usage: /home [名字] }
+  delhome: { description: 删除家, usage: /delhome <名字> }
+  homes: { description: 列出家园, usage: /homes [玩家] }
+  setwarp: { description: 设置地标, usage: /setwarp <名字> }
+  warp: { description: 传送到地标, usage: /warp [名字] }
+  delwarp: { description: 删除地标, usage: /delwarp <名字> }
+  warps: { description: 列出地标, usage: /warps }
+  tpa: { description: 请求传送到玩家, usage: /tpa <玩家> }
+  tpahere: { description: 请求玩家传送到你, usage: /tpahere <玩家> }
+  tpaccept: { description: 接受传送请求, usage: /tpaccept, aliases: [tpyes] }
+  tpdeny: { description: 拒绝传送请求, usage: /tpdeny, aliases: [tpno] }
+  tp: { description: 强制传送到玩家, usage: /tp <玩家> }
+  tphere: { description: 强制传送玩家到你, usage: /tphere <玩家> }
+  tpo: { description: 强制传送(绕过限制), usage: /tpo <玩家> }
+  back: { description: 返回上一位置, usage: /back }
+  spawn: { description: 传送到出生点, usage: /spawn }
+  setspawn: { description: 设置出生点, usage: /setspawn }
+  balance: { description: 查看余额, usage: /balance, aliases: [bal, money] }
+  pay: { description: 转账, usage: /pay <玩家> <金额> }
+  eco: { description: 经济管理, usage: /eco <give|take|set> <玩家> <金额> }
+  baltop: { description: 富豪榜, usage: /baltop [页码] }
+  gmc: { description: 创造模式, usage: /gmc [玩家] }
+  gms: { description: 生存模式, usage: /gms [玩家] }
+  gma: { description: 冒险模式, usage: /gma [玩家] }
+  gmsp: { description: 旁观模式, usage: /gmsp [玩家] }
+  fly: { description: 切换飞行, usage: /fly [玩家] }
+  god: { description: 切换无敌, usage: /god [玩家] }
+  heal: { description: 治疗, usage: /heal [玩家] }
+  feed: { description: 喂饱, usage: /feed [玩家] }
+  vanish: { description: 切换隐身, usage: /vanish [玩家], aliases: [v] }
+  invsee: { description: 查看背包, usage: /invsee <玩家> }
+  nick: { description: 设置昵称, usage: /nick <名字|reset> 或 /nick <玩家> <名字|reset> }
+  enderchest: { description: 打开末影箱, usage: /enderchest [玩家], aliases: [ec] }
+  whois: { description: 查看玩家信息, usage: /whois <玩家> }
+  broadcast: { description: 全服广播, usage: /broadcast <消息>, aliases: [bc] }
+  kit: { description: 领取礼包, usage: /kit [名字] }
+  kits: { description: 礼包列表, usage: /kits }
+  createkit: { description: 创建礼包, usage: /createkit <名字> <冷却秒> }
+  deletekit: { description: 删除礼包, usage: /deletekit <名字> }
+  menu: { description: 打开主菜单, usage: /menu, aliases: [cd] }
+  bind: { description: 绑定命令到物品, usage: /bind <命令> }
+  unbind: { description: 解除绑定, usage: /unbind }
+  binds: { description: 查看绑定列表, usage: /binds }
+  market: { description: 玩家市场, usage: /market [sell <价格>|my], aliases: [ah, shop] }
+  register: { description: 注册账号, usage: /register <密码> <确认密码>, aliases: [reg] }
+  login: { description: 登录, usage: /login <密码>, aliases: [l] }
+  changepassword: { description: 修改密码, usage: /changepassword <旧密码> <新密码> }
+  rtp: { description: 随机传送, usage: /rtp, aliases: [randomtp, wild] }
+  grimbridge: { description: GrimAC 桥接, usage: /grimbridge <status|reload|alerts|verbose|info>, aliases: [gb] }
+  megapunish: { description: 渐进式惩罚, usage: /megapunish <玩家> <检测类型> }
+  claim: { description: 领地管理, usage: /claim [子命令], aliases: [claims] }
