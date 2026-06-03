@@ -32,6 +32,7 @@ public final class MegaPlugin extends JavaPlugin {
         registerModule(new MarketModule(this));
         registerModule(new AuthModule(this));
         registerModule(new RTPModule(this));
+        registerModule(new GrimBridgeModule(this));
 
         getLogger().info("MegaPlugin v1.0.0 enabled! " + modules.size() + " modules loaded.");
     }
