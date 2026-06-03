@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
 public class RTPModule extends MegaModule {
 
     private static final int MIN_RADIUS = 200;    // 最小区块 (200)
-    private static final int MAX_RADIUS = 2000;   // 最大区块 (2000)
+    private static final int MAX_RADIUS = 20000;  // 最大区块 (20000)
     private static final int MAX_ATTEMPTS = 25;   // 找安全位置尝试次数
     private static final long COOLDOWN_MS = 30000; // 冷却时间 30秒
     private static final double COST = 0.0;        // 费用（可配置）
