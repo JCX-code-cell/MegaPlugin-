@@ -30,15 +30,6 @@ public class GrimBridgeModule extends MegaModule {
     @Override
     public void onEnable() {
         registerListener();
-        grimPlugin = Bukkit.getPluginManager().getPlugin("GrimAC");
-        grimLoaded = grimPlugin != null && grimPlugin.isEnabled();
-
-        if (grimLoaded) {
-            plugin.getLogger().info("§a[GrimBridge] 检测到 GrimAC v" + grimPlugin.getDescription().getVersion() + "，已集成！");
-        } else {
-            plugin.getLogger().warning("[GrimBridge] 未检测到 GrimAC，请下载最新版放入 plugins/ 目录");
-            plugin.getLogger().warning("[GrimBridge] 下载: https://modrinth.com/plugin/grimac");
-        }
 
         // 注册桥接命令
         var cmd = plugin.getCommand("grimbridge");
@@ -46,6 +37,19 @@ public class GrimBridgeModule extends MegaModule {
             cmd.setExecutor(new GrimBridgeCmd());
             cmd.setTabCompleter(new GrimBridgeTab());
         }
+
+        // 延迟检测 Grim（等所有插件加载完成后再检测）
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            grimPlugin = Bukkit.getPluginManager().getPlugin("GrimAC");
+            grimLoaded = grimPlugin != null && grimPlugin.isEnabled();
+
+            if (grimLoaded) {
+                plugin.getLogger().info("§a[GrimBridge] 检测到 GrimAC v" + grimPlugin.getDescription().getVersion() + "，已集成！");
+            } else {
+                plugin.getLogger().warning("[GrimBridge] 未检测到 GrimAC，请下载最新版放入 plugins/ 目录");
+                plugin.getLogger().warning("[GrimBridge] 下载: https://modrinth.com/plugin/grimac");
+            }
+        });
     }
 
     public boolean isGrimLoaded() {
