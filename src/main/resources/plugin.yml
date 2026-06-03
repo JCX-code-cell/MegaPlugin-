@@ -230,6 +230,9 @@ commands:
     description: GrimAC bridge management
     usage: /grimbridge <status|reload|alerts|verbose|info>
     aliases: [gb]
+  megapunish:
+    description: Progressive punishment tracker
+    usage: /megapunish <player> <checkType>
 
 
 

@@ -13,6 +13,7 @@ public final class MegaPlugin extends JavaPlugin {
     // Module instances for easy access
     private TeleportModule teleportModule;
     private EconomyModule economyModule;
+    private PunishModule punishModule;
 
     @Override
     public void onEnable() {
@@ -32,6 +33,7 @@ public final class MegaPlugin extends JavaPlugin {
         registerModule(new MarketModule(this));
         registerModule(new AuthModule(this));
         registerModule(new RTPModule(this));
+        punishModule = registerModule(new PunishModule(this));
         registerModule(new GrimBridgeModule(this));
 
         getLogger().info("MegaPlugin v1.0.0 enabled! " + modules.size() + " modules loaded.");
@@ -62,5 +64,9 @@ public final class MegaPlugin extends JavaPlugin {
 
     public EconomyModule getEconomyModule() {
         return economyModule;
+    }
+
+    public PunishModule getPunishModule() {
+        return punishModule;
     }
 }
