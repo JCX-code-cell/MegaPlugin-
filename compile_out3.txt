@@ -1,8 +1,0 @@
-c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:529: 错误: 找不到符号
-        if (Tag.SIGNS.isTagged(m) || Tag.HANGING_SIGNS.isTagged(m)) {
-                                        ^
-  符号:   变量 HANGING_SIGNS
-  位置: 接口 Tag
-注: c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java使用或覆盖了已过时的 API。
-注: 有关详细信息, 请使用 -Xlint:deprecation 重新编译。
-1 个错误

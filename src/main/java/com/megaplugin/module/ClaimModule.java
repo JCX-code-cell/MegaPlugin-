@@ -398,6 +398,30 @@ public class ClaimModule extends MegaModule {
                 || Tag.BUTTONS.isTagged(m) || m == Material.LEVER;
     }
 
+    /** 判断是否为刷怪蛋 */
+    private boolean isSpawnEgg(Material m) {
+        return m.name().endsWith("_SPAWN_EGG");
+    }
+
+    /** 判断是否为染料类物品 */
+    private boolean isDyeItem(Material m) {
+        return m.name().endsWith("_DYE");
+    }
+
+    /** 判断是否为矿车类物品 */
+    private boolean isMinecartItem(Material m) {
+        return m == Material.MINECART || m == Material.CHEST_MINECART
+                || m == Material.FURNACE_MINECART || m == Material.TNT_MINECART
+                || m == Material.HOPPER_MINECART;
+    }
+
+    /** 判断是否为船类物品 */
+    private boolean isBoatItem(Material m) {
+        return m.name().contains("BOAT") || m.name().equals("BAMBOO_RAFT");
+    }
+
+
+
     // ════════════════════════════════════════
     //  事件保护 — 基于 GriefPrevention 架构
     // ════════════════════════════════════════
@@ -456,13 +480,22 @@ public class ClaimModule extends MegaModule {
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onInteract(PlayerInteractEvent e) {
         Player p = e.getPlayer();
-        if (p.getInventory().getItemInMainHand().getType() == Material.WOODEN_AXE) return; // 木斧
+        if (p.getInventory().getItemInMainHand().getType() == Material.WOODEN_AXE) return;
 
         Block b = e.getClickedBlock();
+        Material item = e.getMaterial();
+
+        // ═ RIGHT_CLICK_AIR — 物品对空气使用 ═
         if (b == null) {
-            // 右键空气 — 检查打火石
-            if (e.getAction() == Action.RIGHT_CLICK_AIR && e.getMaterial() == Material.FLINT_AND_STEEL) {
-                String deny = checkProtection(p, p.getLocation(), Perm.BUILD);
+            if (e.getAction() == Action.RIGHT_CLICK_AIR) {
+                String deny = null;
+                if (item == Material.FLINT_AND_STEEL || item == Material.FIRE_CHARGE) {
+                    deny = checkProtection(p, p.getLocation(), Perm.BUILD);
+                } else if (item == Material.ENDER_PEARL || item == Material.ENDER_EYE) {
+                    deny = checkProtection(p, p.getLocation(), Perm.ACCESS);
+                } else if (item == Material.EXPERIENCE_BOTTLE) {
+                    deny = checkProtection(p, p.getLocation(), Perm.BUILD);
+                }
                 if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
             }
             return;
@@ -470,7 +503,7 @@ public class ClaimModule extends MegaModule {
 
         Material m = b.getType();
 
-        // PHYSICAL — 踩踏农田/乌龟蛋
+        // ═ PHYSICAL — 踩踏农田/乌龟蛋/耕地交互 ═
         if (e.getAction() == Action.PHYSICAL) {
             if (m == Material.FARMLAND || m == Material.TURTLE_EGG) {
                 String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
@@ -479,24 +512,92 @@ public class ClaimModule extends MegaModule {
             return;
         }
 
-        // LEFT_CLICK_BLOCK — 仅对特定方块检查 (TNT, 音符盒)
+        // ═ LEFT_CLICK_BLOCK ═
         if (e.getAction() == Action.LEFT_CLICK_BLOCK) {
-            if (m == Material.TNT || m == Material.NOTE_BLOCK) {
+            if (m == Material.TNT || m == Material.NOTE_BLOCK || m == Material.DRAGON_EGG) {
                 String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
                 if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
             }
             return;
         }
 
-        // RIGHT_CLICK_BLOCK ─ 按 GP 分类处理
+        // ═ RIGHT_CLICK_BLOCK ═
+
+        // ── 第一步: 手持物品检查 (对照 GP items needing Build/Container) ──
+        // 骨粉/蜜脾 → BUILD (修改方块)
+        if (item == Material.BONE_MEAL || item == Material.HONEYCOMB) {
+            String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+        }
+        // 末地水晶/打火石 → BUILD
+        if (item == Material.END_CRYSTAL || item == Material.FLINT_AND_STEEL) {
+            String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+        }
+        // 刷怪蛋 → CONTAINER (生成生物影响领地生态)
+        if (isSpawnEgg(item)) {
+            String deny = checkProtection(p, b.getLocation(), Perm.CONTAINER);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+        }
+        // 染料/墨囊/荧光墨囊 → CONTAINER (给羊/告示牌染色)
+        if (isDyeItem(item) || item == Material.INK_SAC || item == Material.GLOW_INK_SAC) {
+            String deny = checkProtection(p, b.getLocation(), Perm.CONTAINER);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+        }
+        // 船 → CONTAINER
+        if (isBoatItem(item)) {
+            String deny = checkProtection(p, b.getLocation(), Perm.CONTAINER);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+        }
+        // 矿车 → CONTAINER
+        if (isMinecartItem(item)) {
+            String deny = checkProtection(p, b.getLocation(), Perm.CONTAINER);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+        }
+        // 盔甲架 → BUILD
+        if (item == Material.ARMOR_STAND) {
+            String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+        }
+        // 末影之眼在传送门框架上 → BUILD
+        if (item == Material.ENDER_EYE && b.getType() == Material.END_PORTAL_FRAME) {
+            String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+        }
+        // 拴绳栓到栅栏/墙壁 → CONTAINER
+        if (item == Material.LEAD) {
+            String deny = checkProtection(p, b.getLocation(), Perm.CONTAINER);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+        }
+        // 命名牌使用 → CONTAINER
+        if (item == Material.NAME_TAG) {
+            String deny = checkProtection(p, b.getLocation(), Perm.CONTAINER);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+        }
+        // 锄头耕土/土径 → BUILD
+        if (item == Material.WOODEN_HOE || item == Material.STONE_HOE || item == Material.IRON_HOE
+                || item == Material.GOLDEN_HOE || item == Material.DIAMOND_HOE || item == Material.NETHERITE_HOE) {
+            String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+        }
+        // 铲子造土径 → BUILD
+        if (item == Material.WOODEN_SHOVEL || item == Material.STONE_SHOVEL || item == Material.IRON_SHOVEL
+                || item == Material.GOLDEN_SHOVEL || item == Material.DIAMOND_SHOVEL || item == Material.NETHERITE_SHOVEL) {
+            if (m == Material.DIRT || m == Material.GRASS_BLOCK || m == Material.PODZOL
+                    || m == Material.COARSE_DIRT || m == Material.MYCELIUM) {
+                String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
+                if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+            }
+        }
+
+        // ── 第二步: 目标方块检查 ──
         // 1. 容器类 → CONTAINER
         if (isContainer(m)) {
             String deny = checkProtection(p, b.getLocation(), Perm.CONTAINER);
-            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
-            return;
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
         }
 
-        // 2. 铁砧/信标/蛋糕/工作台类 → CONTAINER
+        // 2. 铁砧/信标/装饰煲/工作台类 → CONTAINER
         if (m == Material.ANVIL || m == Material.CHIPPED_ANVIL || m == Material.DAMAGED_ANVIL
                 || m == Material.BEACON || m == Material.CRAFTER
                 || m == Material.CARTOGRAPHY_TABLE || m == Material.GRINDSTONE
@@ -504,29 +605,35 @@ public class ClaimModule extends MegaModule {
                 || m == Material.SMITHING_TABLE || m == Material.FLETCHING_TABLE
                 || m == Material.CAULDRON || m == Material.WATER_CAULDRON || m == Material.LAVA_CAULDRON
                 || m == Material.BEEHIVE || m == Material.BEE_NEST
-                || m == Material.BELL || m == Material.COMPOSTER) {
+                || m == Material.BELL || m == Material.COMPOSTER
+                || m == Material.DECORATED_POT || m == Material.SWEET_BERRY_BUSH
+                || m == Material.CAVE_VINES || m == Material.CAVE_VINES_PLANT
+                || m == Material.PUMPKIN || m == Material.RESPAWN_ANCHOR) {
             String deny = checkProtection(p, b.getLocation(), Perm.CONTAINER);
-            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
-            return;
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
         }
 
-        // 3. 门/床/按钮/拉杆 → ACCESS
+        // 3. 蛋糕 → ACCESS (GP treats it as Access when preventTheft is on)
+        if (m == Material.CAKE) {
+            String deny = checkProtection(p, b.getLocation(), Perm.ACCESS);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+        }
+
+        // 4. 门/床/按钮/拉杆 → ACCESS
         if (isAccessBlock(m)) {
             String deny = checkProtection(p, b.getLocation(), Perm.ACCESS);
-            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
-            return;
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
         }
 
-        // 4. 红石/装饰 → BUILD
+        // 5. 红石/装饰 → BUILD
         if (m == Material.REPEATER || m == Material.COMPARATOR || m == Material.DAYLIGHT_DETECTOR
                 || Tag.FLOWER_POTS.isTagged(m) || Tag.CANDLES.isTagged(m)) {
             String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
-            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
-            return;
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
         }
 
-        // 5. 告示牌编辑
-        if (Tag.ALL_SIGNS.isTagged(m)) {
+        // 6. 告示牌编辑 → BUILD
+        if (Tag.ALL_SIGNS.isTagged(m) || Tag.WALL_SIGNS.isTagged(m)) {
             String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
             if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
         }
@@ -761,6 +868,133 @@ public class ClaimModule extends MegaModule {
         if (c != null && (e.getEntity() instanceof Enderman || e.getEntity() instanceof Wither
                 || e.getEntity() instanceof Silverfish || e.getEntity() instanceof Ravager)) {
             e.setCancelled(true);
+        }
+    }
+
+    // ── 实体交互 (对照 GP onPlayerInteractEntity) ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onInteractEntity(PlayerInteractEntityEvent e) {
+        Player p = e.getPlayer();
+        Entity entity = e.getRightClicked();
+        Material item = e.getPlayer().getInventory().getItemInMainHand().getType();
+
+        // 1. 盔甲架 → BUILD
+        if (entity instanceof ArmorStand) {
+            String deny = checkProtection(p, entity.getLocation(), Perm.BUILD);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
+            return;
+        }
+
+        // 2. 物品展示框/画 → BUILD
+        if (entity instanceof Hanging) {
+            String deny = checkProtection(p, entity.getLocation(), Perm.BUILD);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
+            return;
+        }
+
+        // 3. 已驯服马/驴/骆驼/鹦鹉/猫/狼 — 仅主人可交互
+        if (entity instanceof Tameable tame && tame.isTamed() && tame.getOwner() != null) {
+            UUID owner = tame.getOwner().getUniqueId();
+            if (!owner.equals(p.getUniqueId())) {
+                PlayerData pd = getPlayerData(p.getUniqueId());
+                if (!pd.ignoreClaims && !p.hasPermission("megaplugin.claim.admin")) {
+                    e.setCancelled(true);
+                    p.sendMessage(msg("prefix") + " §c这只宠物不是你的！");
+                    return;
+                }
+            }
+            return;
+        }
+
+        // 4. 动物/村民/铁傀儡/雪傀儡 → CONTAINER
+        if (entity instanceof Animals || entity instanceof Villager
+                || entity instanceof IronGolem || entity instanceof Snowman) {
+            String deny = checkProtection(p, entity.getLocation(), Perm.CONTAINER);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+        }
+
+        // 5. 未驯服的载具（船/矿车）→ CONTAINER
+        if (entity instanceof Vehicle && !(entity instanceof Minecart)) {
+            String deny = checkProtection(p, entity.getLocation(), Perm.CONTAINER);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+        }
+
+        // 6. 拴绳使用 → CONTAINER
+        if (item == Material.LEAD && !(entity instanceof LeashHitch)) {
+            String deny = checkProtection(p, entity.getLocation(), Perm.CONTAINER);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); return; }
+        }
+
+        // 7. 命名牌使用 → CONTAINER
+        if (item == Material.NAME_TAG) {
+            String deny = checkProtection(p, entity.getLocation(), Perm.CONTAINER);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
+        }
+    }
+
+    // ── 投掷鸡蛋 (对照 GP onPlayerThrowEgg) ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onThrowEgg(PlayerEggThrowEvent e) {
+        String deny = checkProtection(e.getPlayer(), e.getEgg().getLocation(), Perm.CONTAINER);
+        if (deny != null) {
+            e.setHatching(false);
+            e.getPlayer().sendMessage(msg("prefix") + " " + deny);
+        }
+    }
+
+    // ── 钓鱼 (对照 GP onPlayerFish) ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onFish(PlayerFishEvent e) {
+        if (e.getState() != PlayerFishEvent.State.CAUGHT_ENTITY
+                && e.getState() != PlayerFishEvent.State.CAUGHT_FISH) return;
+        if (e.getCaught() == null) return;
+        Entity caught = e.getCaught();
+        if (caught instanceof ArmorStand || caught instanceof Animals) {
+            String deny = checkProtection(e.getPlayer(), caught.getLocation(), Perm.CONTAINER);
+            if (deny != null) { e.setCancelled(true); e.getPlayer().sendMessage(msg("prefix") + " " + deny); }
+        }
+    }
+
+    // ── 讲台取书 (对照 GP onPlayerTakeLecternBook) ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onTakeLecternBook(PlayerTakeLecternBookEvent e) {
+        String deny = checkProtection(e.getPlayer(), e.getLectern().getLocation(), Perm.CONTAINER);
+        if (deny != null) e.setCancelled(true);
+    }
+
+    // ── 告示牌编辑 (对照 GP onSignChange) ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onSignChange(SignChangeEvent e) {
+        String deny = checkProtection(e.getPlayer(), e.getBlock().getLocation(), Perm.BUILD);
+        if (deny != null) e.setCancelled(true);
+    }
+
+    // ── 喷溅药水 (对照 GP EntityDamageHandler: 有害药水对动物/村民) ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onPotionSplash(PotionSplashEvent e) {
+        if (!(e.getPotion().getShooter() instanceof Player p)) return;
+        // 检查药水影响的所有生物
+        boolean blocked = false;
+        for (LivingEntity entity : e.getAffectedEntities()) {
+            if (entity instanceof Player) continue;
+            if (entity instanceof Animals || entity instanceof Villager
+                    || entity instanceof IronGolem || entity instanceof Snowman) {
+                String deny = checkProtection(p, entity.getLocation(), Perm.CONTAINER);
+                if (deny != null) {
+                    e.setIntensity(entity, 0.0);
+                    blocked = true;
+                }
+            }
+        }
+        if (blocked) p.sendMessage(msg("prefix") + " §c领地内不能对驯养生物使用喷溅药水！");
+    }
+
+    // ── 炼药锅 (对照 GP CauldronLevelChange) ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onCauldronChange(CauldronLevelChangeEvent e) {
+        if (e.getEntity() instanceof Player p) {
+            String deny = checkProtection(p, e.getBlock().getLocation(), Perm.BUILD);
+            if (deny != null) e.setCancelled(true);
         }
     }
 
