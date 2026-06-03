@@ -1,0 +1,6 @@
+name: MegaPlugin
+version: "1.0.0"
+main: com.megaplugin.MegaPlugin
+api-version: "1.21"
+bootstrapper: io.papermc.paper.plugin.bootstrap.BootstrapContext
+loader: io.papermc.paper.plugin.entrypoint.strategy.modern.ModernPluginLoader
