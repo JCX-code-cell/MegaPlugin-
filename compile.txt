@@ -1,2 +1,0 @@
-注: c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java使用或覆盖了已过时的 API。
-注: 有关详细信息, 请使用 -Xlint:deprecation 重新编译。

@@ -360,8 +360,8 @@ public class ClaimModule extends MegaModule {
 
         PlayerData pd = getPlayerData(p.getUniqueId());
 
-        // 1. 管理员模式 (ignoreClaims)
-        if (p.hasPermission("megaplugin.claim.admin") || pd.ignoreClaims) return null;
+        // 1. 管理员模式 (ignoreClaims) — 必须显式 /claim admin 开启
+        if (pd.ignoreClaims) return null;
 
         // 2. 查找领地
         Claim claim = getClaimAt(loc, pd);
@@ -892,12 +892,12 @@ public class ClaimModule extends MegaModule {
             return;
         }
 
-        // 3. 已驯服马/驴/骆驼/鹦鹉/猫/狼 — 仅主人可交互
+        // 3. 已驯服马/驴/骆驼/鹦鹉/猫/狼 — 仅主人可交互 (ignoreClaims 旁路)
         if (entity instanceof Tameable tame && tame.isTamed() && tame.getOwner() != null) {
             UUID owner = tame.getOwner().getUniqueId();
             if (!owner.equals(p.getUniqueId())) {
                 PlayerData pd = getPlayerData(p.getUniqueId());
-                if (!pd.ignoreClaims && !p.hasPermission("megaplugin.claim.admin")) {
+                if (!pd.ignoreClaims) {
                     e.setCancelled(true);
                     p.sendMessage(msg("prefix") + " §c这只宠物不是你的！");
                     return;
