@@ -2,6 +2,9 @@ package com.megaplugin.module;
 
 import com.megaplugin.MegaPlugin;
 import com.megaplugin.util.DataFile;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.title.Title;
 import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.command.Command;
@@ -16,12 +19,14 @@ import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.scheduler.BukkitRunnable;
 
+import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -224,6 +229,10 @@ public class ClaimModule extends MegaModule {
 
     /** 存储最后一次点击的领地，用于 trust GUI */
     private final Map<UUID, String> lastClickClaim = new HashMap<>();
+    /** 追踪玩家当前所在领地，用于进出提示 */
+    private final Map<UUID, String> currentClaim = new HashMap<>();
+    /** 手持木斧时可视化渲染的最近一次时间 */
+    private final Map<UUID, Long> lastParticleTime = new HashMap<>();
 
     @EventHandler
     public void onGuiClick(InventoryClickEvent e) {
@@ -435,9 +444,91 @@ public class ClaimModule extends MegaModule {
         return item;
     }
 
+    // ════════════════════════════════════════
+    //  进出提示 + 粒子
+    // ════════════════════════════════════════
+
+    @EventHandler
+    public void onMove(PlayerMoveEvent e) {
+        Player p = e.getPlayer();
+        if (e.getFrom().getBlockX() == e.getTo().getBlockX()
+                && e.getFrom().getBlockZ() == e.getTo().getBlockZ()) return;
+
+        // ── 手持木斧时可视化附近领地边界 ──
+        if (p.getInventory().getItemInMainHand().getType() == Material.WOODEN_AXE) {
+            Long last = lastParticleTime.get(p.getUniqueId());
+            if (last == null || System.currentTimeMillis() - last > 500) {
+                lastParticleTime.put(p.getUniqueId(), System.currentTimeMillis());
+                ClaimInfo near = getClaimAt(p.getLocation());
+                if (near != null) showClaimParticles(p, near);
+            }
+        }
+
+        // ── 进出领地提示 ──
+        ClaimInfo at = getClaimAt(p.getLocation());
+        String newName = at != null ? at.name() : null;
+        String oldName = currentClaim.get(p.getUniqueId());
+        if (Objects.equals(oldName, newName)) return;
+
+        currentClaim.put(p.getUniqueId(), newName);
+
+        if (newName != null && oldName == null) {
+            // 进入领地
+            String ownerTag = at.owner().equals(p.getUniqueId()) ? "§a" : at.trusted().contains(p.getUniqueId().toString()) ? "§e" : "§c";
+            p.showTitle(Title.title(
+                    Component.text(at.name(), NamedTextColor.GREEN),
+                    Component.text(ownerTag + "主人: " + at.ownerName(), NamedTextColor.GRAY),
+                    Title.Times.times(Duration.ofMillis(500), Duration.ofSeconds(2), Duration.ofMillis(500))
+            ));
+            p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BELL, 0.5f, 1.5f);
+        } else if (newName == null && oldName != null) {
+            // 离开领地
+            p.showTitle(Title.title(
+                    Component.text(text("§7离开领地"), NamedTextColor.DARK_GRAY),
+                    Component.text(""),
+                    Title.Times.times(Duration.ofMillis(300), Duration.ofSeconds(1), Duration.ofMillis(300))
+            ));
+            p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 0.3f, 0.8f);
+        }
+    }
+
+    /** 渲染领地边界粒子 */
+    private void showClaimParticles(Player p, ClaimInfo ci) {
+        World w = p.getWorld();
+        if (!w.getName().equals(ci.world())) return;
+        int y = p.getLocation().getBlockY();
+        // 四个角 + 每 2 格一个点
+        for (int x = ci.minX(); x <= ci.maxX(); x += 2) {
+            spawnParticle(p, x, y, ci.minZ());
+            spawnParticle(p, x, y, ci.maxZ());
+        }
+        for (int z = ci.minZ(); z <= ci.maxZ(); z += 2) {
+            spawnParticle(p, ci.minX(), y, z);
+            spawnParticle(p, ci.maxX(), y, z);
+        }
+        // 四个角柱
+        for (int dy = -1; dy <= 2; dy++) {
+            spawnParticle(p, ci.minX(), y + dy, ci.minZ());
+            spawnParticle(p, ci.maxX(), y + dy, ci.minZ());
+            spawnParticle(p, ci.minX(), y + dy, ci.maxZ());
+            spawnParticle(p, ci.maxX(), y + dy, ci.maxZ());
+        }
+    }
+
+    private void spawnParticle(Player p, int x, int y, int z) {
+        p.spawnParticle(Particle.END_ROD, x + 0.5, y + 0.5, z + 0.5, 1, 0, 0, 0, 0);
+    }
+
+    private net.kyori.adventure.text.Component text(String s) {
+        return net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection().deserialize(s);
+    }
+
     @EventHandler
     public void onQuit(PlayerQuitEvent e) {
-        selections.remove(e.getPlayer().getUniqueId());
-        lastClickClaim.remove(e.getPlayer().getUniqueId());
+        UUID id = e.getPlayer().getUniqueId();
+        selections.remove(id);
+        lastClickClaim.remove(id);
+        currentClaim.remove(id);
+        lastParticleTime.remove(id);
     }
 }
