@@ -3,27 +3,19 @@ package com.megaplugin.module;
 import com.megaplugin.MegaPlugin;
 import com.megaplugin.util.DataFile;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
-import org.bukkit.Material;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
-import org.bukkit.command.CommandSender;
+import org.bukkit.command.*;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
-import org.bukkit.event.block.BlockBreakEvent;
-import org.bukkit.event.block.BlockPlaceEvent;
-import org.bukkit.event.entity.EntityDamageByEntityEvent;
-import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.block.*;
+import org.bukkit.event.entity.*;
 import org.bukkit.event.inventory.*;
 import org.bukkit.event.player.*;
-import org.bukkit.inventory.AnvilInventory;
-import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.potion.PotionEffect;
-import org.bukkit.potion.PotionEffectType;
+import org.bukkit.potion.*;
 import org.bukkit.scheduler.BukkitRunnable;
 
 import java.security.MessageDigest;
@@ -36,7 +28,7 @@ public class AuthModule extends MegaModule {
     private final Set<UUID> loggedIn = new HashSet<>();
     private final Map<UUID, Integer> loginAttempts = new HashMap<>();
     private final Map<UUID, Long> pendingLogin = new HashMap<>();
-    private final Map<UUID, String> regTempPassword = new HashMap<>(); // step1 password
+    private final Map<UUID, String> regStep1 = new HashMap<>(); // store first password during registration
     private static final int LOGIN_TIMEOUT = 60;
     private static final int MAX_ATTEMPTS = 5;
     private static final String SALT = "MegaAuth2024!";
@@ -49,13 +41,11 @@ public class AuthModule extends MegaModule {
     @Override
     public void onEnable() {
         registerListener();
-        var regCmd = plugin.getCommand("register");
-        if (regCmd != null) regCmd.setExecutor(new RegisterCmd());
-        var loginCmd = plugin.getCommand("login");
-        if (loginCmd != null) loginCmd.setExecutor(new LoginCmd());
-        var cpCmd = plugin.getCommand("changepassword");
-        if (cpCmd != null) cpCmd.setExecutor(new ChangePwdCmd());
+        plugin.getCommand("register").setExecutor(new RegisterCmd());
+        plugin.getCommand("login").setExecutor(new LoginCmd());
+        plugin.getCommand("changepassword").setExecutor(new ChangePwdCmd());
 
+        // Load saved passwords
         for (String key : authData.getConfig().getKeys(false)) {
             try {
                 UUID uuid = UUID.fromString(key);
@@ -64,15 +54,15 @@ public class AuthModule extends MegaModule {
             } catch (Exception ignored) {}
         }
 
+        // Timeout checker
         new BukkitRunnable() {
-            @Override
             public void run() {
                 long now = System.currentTimeMillis();
                 for (Player p : Bukkit.getOnlinePlayers()) {
                     if (!loggedIn.contains(p.getUniqueId())) {
-                        Long joinTime = pendingLogin.get(p.getUniqueId());
-                        if (joinTime != null && (now - joinTime) > LOGIN_TIMEOUT * 1000L) {
-                            p.kick(Component.text("§c登录超时！请在 " + LOGIN_TIMEOUT + " 秒内注册或登录。", NamedTextColor.RED));
+                        Long t = pendingLogin.get(p.getUniqueId());
+                        if (t != null && now - t > LOGIN_TIMEOUT * 1000L) {
+                            p.kick(Component.text("§c登录超时！请在 " + LOGIN_TIMEOUT + " 秒内完成登录。", NamedTextColor.RED));
                         }
                     }
                 }
@@ -82,386 +72,290 @@ public class AuthModule extends MegaModule {
 
     @Override
     public void onDisable() {
-        for (var entry : passwords.entrySet()) {
-            authData.getConfig().set(entry.getKey().toString(), entry.getValue());
-        }
+        passwords.forEach((k, v) -> authData.getConfig().set(k.toString(), v));
         authData.save();
         loggedIn.clear();
-        regTempPassword.clear();
+        regStep1.clear();
     }
 
-    public boolean isLoggedIn(Player player) {
-        return loggedIn.contains(player.getUniqueId());
-    }
+    public boolean isLoggedIn(Player p) { return loggedIn.contains(p.getUniqueId()); }
 
-    private String hashPassword(String password) {
+    private String hash(String pw) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] hash = md.digest((password + SALT).getBytes("UTF-8"));
-            StringBuilder hex = new StringBuilder();
-            for (byte b : hash) hex.append(String.format("%02x", b));
-            return hex.toString();
-        } catch (Exception e) {
-            return null;
-        }
+            byte[] b = md.digest((pw + SALT).getBytes("UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            for (byte x : b) sb.append(String.format("%02x", x));
+            return sb.toString();
+        } catch (Exception e) { return null; }
     }
 
-    private void openLoginGui(Player p) {
-        Inventory inv = Bukkit.createInventory(null, InventoryType.ANVIL, "§8🔒 请输入密码登录");
-        inv.setItem(0, createPlaceholder("§7输入密码后点击右侧"));
-        p.openInventory(inv);
-    }
-
-    private void openRegisterGui(Player p) {
-        Inventory inv = Bukkit.createInventory(null, InventoryType.ANVIL, "§8🔑 请设置密码(4位以上)");
-        inv.setItem(0, createPlaceholder("§7输入密码后点击右侧"));
-        p.openInventory(inv);
-    }
-
-    private void openConfirmGui(Player p) {
-        Inventory inv = Bukkit.createInventory(null, InventoryType.ANVIL, "§8🔐 请再次输入密码确认");
-        inv.setItem(0, createPlaceholder("§7再次输入相同密码后点击右侧"));
-        p.openInventory(inv);
-    }
-
-    private ItemStack createPlaceholder(String name) {
-        ItemStack item = new ItemStack(Material.PAPER);
-        ItemMeta meta = item.getItemMeta();
-        if (meta != null) {
-            meta.setDisplayName(name);
-            item.setItemMeta(meta);
-        }
-        return item;
-    }
-
-    private void handleAnvilSubmit(Player p, String input) {
-        if (input == null || input.isEmpty()) return;
-
-        boolean isRegistered = passwords.containsKey(p.getUniqueId());
-
-        if (isRegistered) {
-            // --- LOGIN ---
-            int attempts = loginAttempts.getOrDefault(p.getUniqueId(), 0);
-            if (attempts >= MAX_ATTEMPTS) {
-                p.kick(Component.text("§c登录失败次数过多，请重新加入。", NamedTextColor.RED));
-                return;
-            }
-            String inputHash = hashPassword(input);
-            if (inputHash != null && inputHash.equals(passwords.get(p.getUniqueId()))) {
-                loginPlayer(p);
-                p.closeInventory();
-                p.sendMessage(msg("prefix") + " §a登录成功！欢迎回来 §e" + p.getName());
-            } else {
-                loginAttempts.merge(p.getUniqueId(), 1, Integer::sum);
-                int remaining = MAX_ATTEMPTS - loginAttempts.get(p.getUniqueId());
-                p.sendMessage(msg("prefix") + " §c密码错误！剩余 §e" + remaining + " §c次尝试");
-                // Reopen GUI
-                Bukkit.getScheduler().runTaskLater(plugin, () -> openLoginGui(p), 2L);
-            }
-        } else {
-            // --- REGISTER ---
-            if (!regTempPassword.containsKey(p.getUniqueId())) {
-                // Step 1: save entered password, ask for confirmation
-                if (input.length() < 4) {
-                    p.sendMessage(msg("prefix") + " §c密码至少需要4个字符！");
-                    Bukkit.getScheduler().runTaskLater(plugin, () -> openRegisterGui(p), 2L);
-                    return;
-                }
-                regTempPassword.put(p.getUniqueId(), input);
-                p.closeInventory();
-                Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                    p.sendMessage(msg("prefix") + " §e请再次输入相同的密码以确认");
-                    openConfirmGui(p);
-                }, 1L);
-            } else {
-                // Step 2: verify confirmation matches
-                String firstPassword = regTempPassword.get(p.getUniqueId());
-                regTempPassword.remove(p.getUniqueId());
-                if (!input.equals(firstPassword)) {
-                    p.sendMessage(msg("prefix") + " §c两次输入的密码不一致！请重新注册。");
-                    Bukkit.getScheduler().runTaskLater(plugin, () -> openRegisterGui(p), 2L);
-                    return;
-                }
-                passwords.put(p.getUniqueId(), hashPassword(input));
-                authData.getConfig().set(p.getUniqueId().toString(), hashPassword(input));
-                authData.save();
-                loginPlayer(p);
-                p.closeInventory();
-                p.sendMessage(msg("prefix") + " §a注册成功！欢迎 §e" + p.getName() + " §a加入服务器！");
-            }
-        }
-    }
-
-    // ========== Anvil GUI Events ==========
-
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onAnvilClick(InventoryClickEvent e) {
-        if (!(e.getWhoClicked() instanceof Player p)) return;
-        if (loggedIn.contains(p.getUniqueId())) return;
-        if (e.getInventory().getType() != InventoryType.ANVIL) return;
-
-        // Prevent extracting items
-        if (e.getRawSlot() != 2) {
-            e.setCancelled(true);
-            return;
-        }
-
-        // Slot 2 = result slot, player clicked to confirm
-        AnvilInventory anvil = (AnvilInventory) e.getInventory();
-        String input = anvil.getRenameText();
-        e.setCancelled(true);
-
-        if (input != null && !input.isEmpty()) {
-            handleAnvilSubmit(p, input);
-        }
-    }
-
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onAnvilClose(InventoryCloseEvent e) {
-        if (!(e.getPlayer() instanceof Player p)) return;
-        if (loggedIn.contains(p.getUniqueId())) return;
-
-        // Reopen the appropriate GUI if player tries to close it
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (!loggedIn.contains(p.getUniqueId())) {
-                boolean isRegistered = passwords.containsKey(p.getUniqueId());
-                if (regTempPassword.containsKey(p.getUniqueId())) {
-                    openConfirmGui(p);
-                } else if (isRegistered) {
-                    openLoginGui(p);
-                } else {
-                    openRegisterGui(p);
-                }
-            }
-        }, 2L);
-    }
-
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onAnvilDrag(InventoryDragEvent e) {
-        if (!(e.getWhoClicked() instanceof Player p)) return;
-        if (loggedIn.contains(p.getUniqueId())) return;
-        if (e.getInventory().getType() == InventoryType.ANVIL) e.setCancelled(true);
-    }
-
-    // ========== Other Event Handlers ==========
+    // === Join / Quit ===
 
     @EventHandler(priority = EventPriority.LOWEST)
-    public void onPlayerJoin(PlayerJoinEvent e) {
+    public void onJoin(PlayerJoinEvent e) {
         Player p = e.getPlayer();
         loggedIn.remove(p.getUniqueId());
+        regStep1.remove(p.getUniqueId());
         pendingLogin.put(p.getUniqueId(), System.currentTimeMillis());
         p.setInvulnerable(true);
-        p.setAllowFlight(false);
-        p.setFlySpeed(0.1f);
-
         p.addPotionEffect(new PotionEffect(PotionEffectType.BLINDNESS, Integer.MAX_VALUE, 0, false, false));
 
-        // Hide from all
+        // Hide all players bidirectionally
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            for (Player other : Bukkit.getOnlinePlayers()) {
-                if (other.equals(p)) continue;
-                p.hidePlayer(plugin, other);
-                other.hidePlayer(plugin, p);
+            for (Player o : Bukkit.getOnlinePlayers()) {
+                if (o.equals(p)) continue;
+                p.hidePlayer(plugin, o);
+                o.hidePlayer(plugin, p);
             }
-        }, 5L);
+        }, 8L);
 
-        // Open GUI after short delay
+        // Show login/register prompt
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             if (!loggedIn.contains(p.getUniqueId())) {
                 if (passwords.containsKey(p.getUniqueId())) {
-                    openLoginGui(p);
+                    sendLoginPrompt(p);
                 } else {
-                    openRegisterGui(p);
+                    sendRegisterPrompt(p);
                 }
             }
-        }, 10L);
+        }, 15L);
+    }
+
+    private void sendLoginPrompt(Player p) {
+        p.sendMessage("");
+        p.sendMessage(com.megaplugin.util.Color.colorize("   §8§m                  §r §8[ §6§l登录验证 §8] §8§m                  "));
+        p.sendMessage("");
+        p.sendMessage(com.megaplugin.util.Color.colorize("   §7欢迎回来，§e" + p.getName() + "§7！请输入密码登录。"));
+        p.sendMessage("");
+        p.sendMessage(com.megaplugin.util.Color.colorize("   §7方式一：§f在聊天框直接输入密码"));
+        p.sendMessage(com.megaplugin.util.Color.colorize("   §7方式二：§f使用命令 §e/login <密码>"));
+        p.sendMessage("");
+        p.sendMessage(com.megaplugin.util.Color.colorize("   §7剩余时间：§e" + LOGIN_TIMEOUT + "秒 §7| 最大尝试：§e" + MAX_ATTEMPTS + "次"));
+        p.sendMessage(com.megaplugin.util.Color.colorize("   §8§m                                                    "));
+        p.sendMessage("");
+    }
+
+    private void sendRegisterPrompt(Player p) {
+        p.sendMessage("");
+        p.sendMessage(com.megaplugin.util.Color.colorize("   §8§m                  §r §8[ §a§l注册账号 §8] §8§m                  "));
+        p.sendMessage("");
+        p.sendMessage(com.megaplugin.util.Color.colorize("   §7欢迎首次来到服务器，§e" + p.getName() + "§7！"));
+        p.sendMessage("");
+        p.sendMessage(com.megaplugin.util.Color.colorize("   §7方式一：§f在聊天框输入 §e<密码> <确认密码>"));
+        p.sendMessage(com.megaplugin.util.Color.colorize("   §7方式二：§f使用命令 §e/register <密码> <确认密码>"));
+        p.sendMessage(com.megaplugin.util.Color.colorize("   §7密码至少 §e4 §7个字符"));
+        p.sendMessage("");
+        p.sendMessage(com.megaplugin.util.Color.colorize("   §8§m                                                    "));
+        p.sendMessage("");
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
-    public void onPlayerQuit(PlayerQuitEvent e) {
+    public void onQuit(PlayerQuitEvent e) {
         UUID id = e.getPlayer().getUniqueId();
         loggedIn.remove(id);
         pendingLogin.remove(id);
         loginAttempts.remove(id);
-        regTempPassword.remove(id);
+        regStep1.remove(id);
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onMove(PlayerMoveEvent e) {
-        if (!loggedIn.contains(e.getPlayer().getUniqueId())) {
-            if (e.getFrom().getX() != e.getTo().getX() ||
-                e.getFrom().getY() != e.getTo().getY() ||
-                e.getFrom().getZ() != e.getTo().getZ()) {
-                e.setCancelled(true);
-            }
-        }
-    }
+    // === Chat-based auth (player types password in chat) ===
 
     @EventHandler(priority = EventPriority.LOWEST)
     public void onChat(AsyncPlayerChatEvent e) {
-        if (!loggedIn.contains(e.getPlayer().getUniqueId())) {
-            e.setCancelled(true);
-        }
-    }
-
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onCommand(PlayerCommandPreprocessEvent e) {
         Player p = e.getPlayer();
-        if (!loggedIn.contains(p.getUniqueId())) {
-            String cmd = e.getMessage().split(" ")[0].toLowerCase();
-            if (!cmd.equals("/login") && !cmd.equals("/register") && !cmd.equals("/l") && !cmd.equals("/reg")) {
-                e.setCancelled(true);
+        if (loggedIn.contains(p.getUniqueId())) return;
+
+        e.setCancelled(true);
+        String msg = e.getMessage().trim();
+        if (msg.isEmpty()) return;
+
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (loggedIn.contains(p.getUniqueId())) return; // already logged in via command
+
+            if (passwords.containsKey(p.getUniqueId())) {
+                // LOGIN via chat
+                handleLogin(p, msg);
+            } else {
+                // REGISTER via chat: expect "password password"
+                String[] parts = msg.split("\\s+", 2);
+                if (parts.length >= 2) {
+                    handleRegister(p, parts[0], parts[1]);
+                } else if (regStep1.containsKey(p.getUniqueId())) {
+                    // Second step of registration
+                    handleRegisterStep2(p, msg);
+                } else {
+                    p.sendMessage(com.megaplugin.util.Color.colorize(msg("prefix") + " §7注册请在聊天中输入: §e<密码> <确认密码>"));
+                    p.sendMessage(com.megaplugin.util.Color.colorize(msg("prefix") + " §7或使用命令: §e/register <密码> <确认密码>"));
+                }
             }
-        }
+        });
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onInteract(PlayerInteractEvent e) {
-        if (!loggedIn.contains(e.getPlayer().getUniqueId())) e.setCancelled(true);
-    }
+    // === Command preprocess: allow only auth commands ===
 
     @EventHandler(priority = EventPriority.LOWEST)
-    public void onInventoryOpen(InventoryOpenEvent e) {
-        if (e.getPlayer() instanceof Player p && e.getInventory().getType() != InventoryType.ANVIL
-            && !loggedIn.contains(p.getUniqueId())) {
+    public void onCmd(PlayerCommandPreprocessEvent e) {
+        Player p = e.getPlayer();
+        if (loggedIn.contains(p.getUniqueId())) return;
+        String c = e.getMessage().split(" ")[0].toLowerCase();
+        if (!c.equals("/login") && !c.equals("/register") && !c.equals("/l") && !c.equals("/reg")) {
             e.setCancelled(true);
+            p.sendMessage(com.megaplugin.util.Color.colorize(msg("prefix") + " §c请先完成登录！"));
         }
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onInventoryClick(InventoryClickEvent e) {
-        if (e.getWhoClicked() instanceof Player p && e.getInventory().getType() != InventoryType.ANVIL
-            && !loggedIn.contains(p.getUniqueId())) {
-            e.setCancelled(true);
-        }
-    }
+    // === Frozen state handlers ===
 
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onDrop(PlayerDropItemEvent e) {
+    @EventHandler(priority = EventPriority.LOWEST) public void onMove(PlayerMoveEvent e) {
+        if (!loggedIn.contains(e.getPlayer().getUniqueId()) && moved(e)) e.setCancelled(true);
+    }
+    @EventHandler(priority = EventPriority.LOWEST) public void onInteract(PlayerInteractEvent e) {
         if (!loggedIn.contains(e.getPlayer().getUniqueId())) e.setCancelled(true);
     }
-
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onPickup(PlayerAttemptPickupItemEvent e) {
+    @EventHandler(priority = EventPriority.LOWEST) public void onInvOpen(InventoryOpenEvent e) {
+        if (e.getPlayer() instanceof Player p && !loggedIn.contains(p.getUniqueId())) e.setCancelled(true);
+    }
+    @EventHandler(priority = EventPriority.LOWEST) public void onInvClick(InventoryClickEvent e) {
+        if (e.getWhoClicked() instanceof Player p && !loggedIn.contains(p.getUniqueId())) e.setCancelled(true);
+    }
+    @EventHandler(priority = EventPriority.LOWEST) public void onDrop(PlayerDropItemEvent e) {
         if (!loggedIn.contains(e.getPlayer().getUniqueId())) e.setCancelled(true);
     }
-
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onBlockBreak(BlockBreakEvent e) {
+    @EventHandler(priority = EventPriority.LOWEST) public void onPickup(PlayerAttemptPickupItemEvent e) {
         if (!loggedIn.contains(e.getPlayer().getUniqueId())) e.setCancelled(true);
     }
-
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onBlockPlace(BlockPlaceEvent e) {
+    @EventHandler(priority = EventPriority.LOWEST) public void onBreak(BlockBreakEvent e) {
         if (!loggedIn.contains(e.getPlayer().getUniqueId())) e.setCancelled(true);
     }
-
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onDamage(EntityDamageEvent e) {
+    @EventHandler(priority = EventPriority.LOWEST) public void onPlace(BlockPlaceEvent e) {
+        if (!loggedIn.contains(e.getPlayer().getUniqueId())) e.setCancelled(true);
+    }
+    @EventHandler(priority = EventPriority.LOWEST) public void onDmg(EntityDamageEvent e) {
         if (e.getEntity() instanceof Player p && !loggedIn.contains(p.getUniqueId())) e.setCancelled(true);
     }
-
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onDamageOther(EntityDamageByEntityEvent e) {
+    @EventHandler(priority = EventPriority.LOWEST) public void onDmg2(EntityDamageByEntityEvent e) {
         if (e.getDamager() instanceof Player p && !loggedIn.contains(p.getUniqueId())) e.setCancelled(true);
     }
 
-    // ========== Commands ==========
+    private boolean moved(PlayerMoveEvent e) {
+        return e.getFrom().getX() != e.getTo().getX() || e.getFrom().getY() != e.getTo().getY() || e.getFrom().getZ() != e.getTo().getZ();
+    }
 
-    private class RegisterCmd implements CommandExecutor {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
-            if (passwords.containsKey(p.getUniqueId())) {
-                p.sendMessage(msg("prefix") + " §c你已经注册过了！");
-                return true;
-            }
-            if (args.length < 2) {
-                openRegisterGui(p);
-                return true;
-            }
-            if (args[0].length() < 4) {
-                p.sendMessage(msg("prefix") + " §c密码至少需要4个字符！");
-                return true;
-            }
-            if (!args[0].equals(args[1])) {
-                p.sendMessage(msg("prefix") + " §c两次输入的密码不一致！");
-                return true;
-            }
-            passwords.put(p.getUniqueId(), hashPassword(args[0]));
-            authData.getConfig().set(p.getUniqueId().toString(), hashPassword(args[0]));
-            authData.save();
+    // === Login / Register logic ===
+
+    private void handleLogin(Player p, String input) {
+        int tries = loginAttempts.getOrDefault(p.getUniqueId(), 0);
+        if (tries >= MAX_ATTEMPTS) {
+            p.kick(Component.text("§c登录失败次数过多，请重新加入。", NamedTextColor.RED));
+            return;
+        }
+        String h = hash(input);
+        if (h != null && h.equals(passwords.get(p.getUniqueId()))) {
             loginPlayer(p);
-            p.closeInventory();
-            p.sendMessage(msg("prefix") + " §a注册成功！欢迎 §e" + p.getName() + " §a加入服务器！");
-            return true;
+            p.sendMessage(com.megaplugin.util.Color.colorize(msg("prefix") + " §a登录成功！欢迎回来 §e" + p.getName()));
+        } else {
+            loginAttempts.merge(p.getUniqueId(), 1, Integer::sum);
+            int rem = MAX_ATTEMPTS - loginAttempts.get(p.getUniqueId());
+            p.sendMessage(com.megaplugin.util.Color.colorize(msg("prefix") + " §c密码错误！剩余 §e" + rem + " §c次机会"));
         }
     }
 
-    private class LoginCmd implements CommandExecutor {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
-            if (loggedIn.contains(p.getUniqueId())) {
-                p.sendMessage(msg("prefix") + " §a你已经登录了！");
-                return true;
-            }
-            if (!passwords.containsKey(p.getUniqueId())) {
-                p.sendMessage(msg("prefix") + " §c你还没有注册！");
-                return true;
-            }
-            if (args.length < 1) {
-                openLoginGui(p);
-                return true;
-            }
-            handleAnvilSubmit(p, args[0]);
-            return true;
+    private void handleRegister(Player p, String pw1, String pw2) {
+        regStep1.remove(p.getUniqueId()); // clear any pending step
+        if (pw1.length() < 4) {
+            p.sendMessage(com.megaplugin.util.Color.colorize(msg("prefix") + " §c密码至少需要4个字符！"));
+            return;
         }
+        if (!pw1.equals(pw2)) {
+            p.sendMessage(com.megaplugin.util.Color.colorize(msg("prefix") + " §c两次密码不一致！"));
+            return;
+        }
+        passwords.put(p.getUniqueId(), hash(pw1));
+        authData.getConfig().set(p.getUniqueId().toString(), hash(pw1));
+        authData.save();
+        loginPlayer(p);
+        p.sendMessage(com.megaplugin.util.Color.colorize(msg("prefix") + " §a注册成功！欢迎 §e" + p.getName() + " §a加入服务器！"));
     }
 
-    private class ChangePwdCmd implements CommandExecutor {
-        @Override
-        public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-            if (!(sender instanceof Player p)) { sender.sendMessage(msg("player-only")); return true; }
-            if (!loggedIn.contains(p.getUniqueId())) {
-                p.sendMessage(msg("prefix") + " §c请先登录！");
-                return true;
-            }
-            if (!passwords.containsKey(p.getUniqueId())) {
-                p.sendMessage(msg("prefix") + " §c你还没有注册！");
-                return true;
-            }
-            if (args.length < 2) {
-                p.sendMessage(msg("prefix") + " §c用法: /changepassword <旧密码> <新密码>");
-                return true;
-            }
-            if (!hashPassword(args[0]).equals(passwords.get(p.getUniqueId()))) {
-                p.sendMessage(msg("prefix") + " §c旧密码错误！");
-                return true;
-            }
-            if (args[1].length() < 4) {
-                p.sendMessage(msg("prefix") + " §c新密码至少需要4个字符！");
-                return true;
-            }
-            passwords.put(p.getUniqueId(), hashPassword(args[1]));
-            authData.getConfig().set(p.getUniqueId().toString(), hashPassword(args[1]));
-            authData.save();
-            p.sendMessage(msg("prefix") + " §a密码修改成功！");
-            return true;
+    private void handleRegisterStep2(Player p, String confirm) {
+        String pw1 = regStep1.remove(p.getUniqueId());
+        if (pw1 == null) {
+            p.sendMessage(com.megaplugin.util.Color.colorize(msg("prefix") + " §c注册超时，请重新输入: §e<密码> <确认密码>"));
+            return;
         }
+        if (!pw1.equals(confirm)) {
+            p.sendMessage(com.megaplugin.util.Color.colorize(msg("prefix") + " §c两次密码不一致！请重新输入: §e<密码> <确认密码>"));
+            return;
+        }
+        passwords.put(p.getUniqueId(), hash(pw1));
+        authData.getConfig().set(p.getUniqueId().toString(), hash(pw1));
+        authData.save();
+        loginPlayer(p);
+        p.sendMessage(com.megaplugin.util.Color.colorize(msg("prefix") + " §a注册成功！欢迎 §e" + p.getName() + " §a加入服务器！"));
     }
 
     private void loginPlayer(Player p) {
         loggedIn.add(p.getUniqueId());
         pendingLogin.remove(p.getUniqueId());
         loginAttempts.remove(p.getUniqueId());
+        regStep1.remove(p.getUniqueId());
         p.setInvulnerable(false);
         p.removePotionEffect(PotionEffectType.BLINDNESS);
+        // Restore visibility
         Bukkit.getScheduler().runTask(plugin, () -> {
-            for (Player online : Bukkit.getOnlinePlayers()) {
-                p.showPlayer(plugin, online);
-                online.showPlayer(plugin, p);
+            for (Player o : Bukkit.getOnlinePlayers()) {
+                p.showPlayer(plugin, o);
+                o.showPlayer(plugin, p);
             }
         });
+    }
+
+    // === Commands ===
+
+    private class RegisterCmd implements CommandExecutor {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!(s instanceof Player p)) { s.sendMessage(msg("player-only")); return true; }
+            if (passwords.containsKey(p.getUniqueId())) { p.sendMessage(msg("prefix") + " §c你已经注册过了！"); return true; }
+            if (loggedIn.contains(p.getUniqueId())) { p.sendMessage(msg("prefix") + " §a你已经登录了！"); return true; }
+            if (a.length < 2) {
+                p.sendMessage(msg("prefix") + " §c用法: /register <密码> <确认密码>");
+                p.sendMessage(msg("prefix") + " §7或直接在聊天中输入: §e<密码> <确认密码>");
+                return true;
+            }
+            handleRegister(p, a[0], a[1]);
+            return true;
+        }
+    }
+
+    private class LoginCmd implements CommandExecutor {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!(s instanceof Player p)) { s.sendMessage(msg("player-only")); return true; }
+            if (loggedIn.contains(p.getUniqueId())) { p.sendMessage(msg("prefix") + " §a你已经登录了！"); return true; }
+            if (!passwords.containsKey(p.getUniqueId())) { p.sendMessage(msg("prefix") + " §c你还没有注册！"); return true; }
+            if (a.length < 1) {
+                p.sendMessage(msg("prefix") + " §c用法: /login <密码>");
+                p.sendMessage(msg("prefix") + " §7或直接在聊天中输入密码");
+                return true;
+            }
+            handleLogin(p, a[0]);
+            return true;
+        }
+    }
+
+    private class ChangePwdCmd implements CommandExecutor {
+        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+            if (!(s instanceof Player p)) { s.sendMessage(msg("player-only")); return true; }
+            if (!loggedIn.contains(p.getUniqueId())) { p.sendMessage(msg("prefix") + " §c请先登录！"); return true; }
+            if (!passwords.containsKey(p.getUniqueId())) { p.sendMessage(msg("prefix") + " §c你还没有注册！"); return true; }
+            if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /changepassword <旧密码> <新密码>"); return true; }
+            if (!hash(a[0]).equals(passwords.get(p.getUniqueId()))) { p.sendMessage(msg("prefix") + " §c旧密码错误！"); return true; }
+            if (a[1].length() < 4) { p.sendMessage(msg("prefix") + " §c新密码至少需要4个字符！"); return true; }
+            passwords.put(p.getUniqueId(), hash(a[1]));
+            authData.getConfig().set(p.getUniqueId().toString(), hash(a[1]));
+            authData.save();
+            p.sendMessage(msg("prefix") + " §a密码修改成功！");
+            return true;
+        }
     }
 }
