@@ -67,7 +67,7 @@ permissions:
   megaplugin.market.sell:
     default: true
   megaplugin.claim.admin:
-    default: op
+    default: false
 
 commands:
   sethome:
