@@ -2,6 +2,7 @@ package com.megaplugin.module;
 
 import com.megaplugin.MegaPlugin;
 import com.megaplugin.util.DataFile;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.command.*;
 import org.bukkit.entity.Player;
@@ -26,6 +27,7 @@ public class HomeModule extends MegaModule {
         cmd("home", new HomeCmd());
         cmd("delhome", new DelhomeCmd());
         cmd("homes", new HomesCmd());
+        Bukkit.getScheduler().runTaskTimer(plugin, data::save, 6000L, 6000L);
     }
 
     @Override

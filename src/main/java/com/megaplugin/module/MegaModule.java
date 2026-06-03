@@ -30,8 +30,12 @@ public abstract class MegaModule implements Listener {
     /** 从 config.yml 的 messages 段获取消息 */
     protected String msg(String key) {
         String prefix = plugin.getConfig().getString("messages.prefix", "");
-        String msg = plugin.getConfig().getString("messages." + key, key);
-        return Color.colorize(msg.replace("{prefix}", prefix));
+        String path = "messages." + key;
+        if (!plugin.getConfig().contains(path)) {
+            plugin.getLogger().warning("[MegaModule] 消息键缺失: " + path);
+            return Color.colorize(prefix + " §c[消息缺失: " + key + "]");
+        }
+        return Color.colorize(plugin.getConfig().getString(path).replace("{prefix}", prefix));
     }
 
     /** 带键值对替换的消息 */

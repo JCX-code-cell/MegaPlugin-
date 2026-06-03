@@ -8,15 +8,17 @@ import org.bukkit.command.*;
 import org.bukkit.entity.Player;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
  * 经济模块 — /bal /pay /eco /baltop
+ * 内部以 long(分) 存储避免浮点精度问题，ConcurrentHashMap 线程安全。
  */
 public class EconomyModule extends MegaModule {
 
     private final DataFile data = new DataFile(plugin, "economy.yml");
-    private final Map<UUID, Double> balances = new HashMap<>();
+    private final Map<UUID, Long> balances = new ConcurrentHashMap<>(); // 余额单位: 分（1 元 = 100 分）
 
     public EconomyModule(MegaPlugin plugin) { super(plugin); }
 
@@ -28,16 +30,23 @@ public class EconomyModule extends MegaModule {
         cmd("baltop", new BaltopCmd());
 
         for (String k : data.getConfig().getKeys(false)) {
-            try { balances.put(UUID.fromString(k), data.getConfig().getDouble(k, 0.0)); }
+            try { balances.put(UUID.fromString(k), data.getConfig().getLong(k, 0)); }
             catch (Exception ignored) {}
         }
+
+        // 定时自动保存 (每 5 分钟)
+        Bukkit.getScheduler().runTaskTimer(plugin, this::saveData, 6000L, 6000L);
     }
 
     @Override
     public void onDisable() {
+        saveData();
+        super.onDisable();
+    }
+
+    private void saveData() {
         for (var e : balances.entrySet()) data.getConfig().set(e.getKey().toString(), e.getValue());
         data.save();
-        super.onDisable();
     }
 
     private void cmd(String name, CommandExecutor exe) {
@@ -48,32 +57,56 @@ public class EconomyModule extends MegaModule {
         }
     }
 
-    // ── API ──
-    public double bal(UUID id) { return balances.getOrDefault(id, cfgDouble("economy.starting-balance", 100.0)); }
-    public boolean has(UUID id, double amount) { return bal(id) >= amount; }
+    // ═══════ API (对外接口, 以元为单位) ═══════
 
+    /** 获取余额(元) */
+    public double bal(UUID id) {
+        long cents = balances.getOrDefault(id, startingCents());
+        return cents / 100.0;
+    }
+
+    /** 检查是否有足够的金额 */
+    public boolean has(UUID id, double amount) {
+        return cents(id) >= toCents(amount);
+    }
+
+    /** 存款 */
     public boolean deposit(UUID id, double amount) {
-        balances.put(id, round(bal(id) + amount));
+        balances.merge(id, toCents(amount), Long::sum);
         return true;
     }
 
+    /** 取款 (余额不足返回 false) */
     public boolean withdraw(UUID id, double amount) {
-        if (!has(id, amount)) return false;
-        balances.put(id, round(bal(id) - amount));
+        long c = toCents(amount), current = balances.getOrDefault(id, 0L);
+        if (current < c) return false;
+        balances.put(id, current - c);
         return true;
     }
 
+    /** 转账 */
     public boolean transfer(UUID from, UUID to, double amount) {
-        if (!withdraw(from, amount)) return false;
-        deposit(to, amount);
+        long c = toCents(amount);
+        long current = balances.getOrDefault(from, 0L);
+        if (current < c) return false;
+        balances.put(from, current - c);
+        balances.merge(to, c, Long::sum);
         return true;
     }
 
-    private double round(double v) { return Math.round(v * 100.0) / 100.0; }
-    private double cfgDouble(String path, double def) { return plugin.getConfig().getDouble(path, def); }
-    private String fmt(double v) {
-        return plugin.getConfig().getString("economy.currency-symbol", "$") + String.format("%.2f", v);
+    // ═══════ 内部 ═══════
+
+    private long cents(UUID id) { return balances.getOrDefault(id, startingCents()); }
+    private long startingCents() { return toCents(plugin.getConfig().getDouble("economy.starting-balance", 100.0)); }
+
+    /** 元 → 分, 四舍五入 */
+    private static long toCents(double yuan) { return Math.round(yuan * 100.0); }
+
+    /** 格式化显示 */
+    private String fmt(double yuan) {
+        return plugin.getConfig().getString("economy.currency-symbol", "$") + String.format("%.2f", yuan);
     }
+    private String fmtCents(long cents) { return fmt(cents / 100.0); }
 
     @SuppressWarnings("deprecation")
     private Player player(String name) { return plugin.getServer().getPlayer(name); }
@@ -108,9 +141,10 @@ public class EconomyModule extends MegaModule {
             if (t == null || t == p) { p.sendMessage(msg("prefix") + " §c目标无效！"); return true; }
             double amount;
             try { amount = Double.parseDouble(a[1]); } catch (Exception ex) { p.sendMessage(msg("invalid-number")); return true; }
-            if (amount <= 0) { p.sendMessage(msg("prefix") + " §c金额必须大于0！"); return true; }
+            if (amount <= 0) { p.sendMessage(msg("prefix") + " §c金额必须大于 0！"); return true; }
             if (!transfer(p.getUniqueId(), t.getUniqueId(), amount)) {
-                p.sendMessage(msg("prefix") + " §c余额不足！"); return true;
+                p.sendMessage(msg("prefix") + " §c余额不足！当前: " + fmt(bal(p.getUniqueId())));
+                return true;
             }
             p.sendMessage(msg("prefix") + " §a已向 §e" + t.getName() + " §a支付 §e" + fmt(amount));
             t.sendMessage(msg("prefix") + " §a收到 §e" + fmt(amount) + " §a来自 §e" + p.getName());
@@ -136,8 +170,8 @@ public class EconomyModule extends MegaModule {
             String name = t.getName() != null ? t.getName() : a[1];
             switch (a[0].toLowerCase()) {
                 case "give" -> { deposit(id, amount); s.sendMessage(msg("prefix") + " §a给予 " + name + " " + fmt(amount)); }
-                case "take" -> { balances.put(id, Math.max(0, bal(id) - amount)); s.sendMessage(msg("prefix") + " §a扣除 " + name + " " + fmt(amount)); }
-                case "set" -> { balances.put(id, Math.max(0, amount)); s.sendMessage(msg("prefix") + " §a设置 " + name + " 余额为 " + fmt(amount)); }
+                case "take" -> { balances.put(id, Math.max(0, cents(id) - toCents(amount))); s.sendMessage(msg("prefix") + " §a扣除 " + name + " " + fmt(amount)); }
+                case "set" -> { balances.put(id, Math.max(0, toCents(amount))); s.sendMessage(msg("prefix") + " §a设置 " + name + " 余额为 " + fmt(amount)); }
                 default -> s.sendMessage(msg("prefix") + " §c用法: /eco <give|take|set> <玩家> <金额>");
             }
             return true;
@@ -157,7 +191,7 @@ public class EconomyModule extends MegaModule {
             if (a.length > 0) try { page = Integer.parseInt(a[0]); } catch (Exception ignored) {}
 
             var sorted = balances.entrySet().stream()
-                    .sorted(Map.Entry.<UUID, Double>comparingByValue().reversed())
+                    .sorted(Map.Entry.<UUID, Long>comparingByValue().reversed())
                     .collect(Collectors.toList());
             int pp = 10, tp = Math.max(1, (sorted.size() + pp - 1) / pp);
             page = Math.max(1, Math.min(page, tp));
@@ -168,7 +202,7 @@ public class EconomyModule extends MegaModule {
                 var e = sorted.get(i);
                 String name = Bukkit.getOfflinePlayer(e.getKey()).getName();
                 if (name == null) name = e.getKey().toString().substring(0, 8);
-                s.sendMessage(" §e" + (i + 1) + ". §7" + name + " §f- §e" + fmt(e.getValue()));
+                s.sendMessage(" §e" + (i + 1) + ". §7" + name + " §f- §e" + fmtCents(e.getValue()));
             }
             if (sorted.isEmpty()) s.sendMessage(msg("prefix") + " §7暂无记录。");
             return true;

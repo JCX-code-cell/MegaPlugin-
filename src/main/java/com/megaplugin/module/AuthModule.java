@@ -17,11 +17,15 @@ import org.bukkit.event.player.*;
 import org.bukkit.potion.*;
 import org.bukkit.scheduler.BukkitRunnable;
 
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
 import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.util.*;
 
 /**
  * 认证模块 — 登录/注册/修改密码 + 冻结未登录玩家
+ * 密码存储: PBKDF2WithHmacSHA256, 每用户独立 16 字节随机盐
  */
 public class AuthModule extends MegaModule {
 
@@ -33,7 +37,9 @@ public class AuthModule extends MegaModule {
     private final Map<UUID, String> regStep1 = new HashMap<>();
 
     private static final int TIMEOUT = 60, MAX_ATTEMPTS = 5;
-    private static final String SALT = "MegaAuth2024!";
+    private static final int PBKDF2_ITER = 120000; // OWASP 2023 推荐 ≥ 600k, 但兼顾性能取 120k
+    private static final int SALT_LEN = 16;
+    private static final SecureRandom RNG = new SecureRandom();
 
     public AuthModule(MegaPlugin plugin) { super(plugin); }
 
@@ -77,14 +83,47 @@ public class AuthModule extends MegaModule {
 
     public boolean isLoggedIn(Player p) { return loggedIn.contains(p.getUniqueId()); }
 
+    /**
+     * PBKDF2WithHmacSHA256, 每用户随机盐
+     * 存储格式: hex_salt:hex_hash
+     */
     private String hash(String pw) {
         try {
-            var md = MessageDigest.getInstance("SHA-256");
-            byte[] b = md.digest((pw + SALT).getBytes("UTF-8"));
-            var sb = new StringBuilder();
-            for (byte x : b) sb.append(String.format("%02x", x));
-            return sb.toString();
+            byte[] salt = new byte[SALT_LEN];
+            RNG.nextBytes(salt);
+            var spec = new PBEKeySpec(pw.toCharArray(), salt, PBKDF2_ITER, 256);
+            var factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+            byte[] hash = factory.generateSecret(spec).getEncoded();
+            return bytesToHex(salt) + ":" + bytesToHex(hash);
         } catch (Exception e) { return null; }
+    }
+
+    private boolean verify(String pw, String stored) {
+        try {
+            if (stored == null || !stored.contains(":")) return false;
+            String[] parts = stored.split(":", 2);
+            byte[] salt = hexToBytes(parts[0]);
+            byte[] expected = hexToBytes(parts[1]);
+            var spec = new PBEKeySpec(pw.toCharArray(), salt, PBKDF2_ITER, 256);
+            var factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+            byte[] actual = factory.generateSecret(spec).getEncoded();
+            return MessageDigest.isEqual(actual, expected);
+        } catch (Exception e) { return false; }
+    }
+
+    private static String bytesToHex(byte[] b) {
+        StringBuilder sb = new StringBuilder();
+        for (byte x : b) sb.append(String.format("%02x", x));
+        return sb.toString();
+    }
+
+    private static byte[] hexToBytes(String hex) {
+        int len = hex.length();
+        byte[] data = new byte[len / 2];
+        for (int i = 0; i < len; i += 2)
+            data[i / 2] = (byte) ((Character.digit(hex.charAt(i), 16) << 4)
+                                 + Character.digit(hex.charAt(i + 1), 16));
+        return data;
     }
 
     // ── Join / Quit ──
@@ -179,8 +218,7 @@ public class AuthModule extends MegaModule {
     private void doLogin(Player p, String input) {
         int tries = loginAttempts.getOrDefault(p.getUniqueId(), 0);
         if (tries >= MAX_ATTEMPTS) { p.kick(Component.text("§c尝试次数过多！", NamedTextColor.RED)); return; }
-        String h = hash(input);
-        if (h != null && h.equals(passwords.get(p.getUniqueId()))) {
+        if (verify(input, passwords.get(p.getUniqueId()))) {
             loginPlayer(p);
             p.sendMessage(Color.colorize(msg("prefix") + " §a登录成功！欢迎回来 §e" + p.getName()));
         } else {
@@ -253,7 +291,7 @@ public class AuthModule extends MegaModule {
             if (!(s instanceof Player p)) { s.sendMessage(msg("player-only")); return true; }
             if (!loggedIn.contains(p.getUniqueId())) { p.sendMessage(msg("prefix") + " §c请先登录！"); return true; }
             if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /changepassword <旧密码> <新密码>"); return true; }
-            if (!hash(a[0]).equals(passwords.get(p.getUniqueId()))) { p.sendMessage(msg("prefix") + " §c旧密码错误！"); return true; }
+            if (!verify(a[0], passwords.get(p.getUniqueId()))) { p.sendMessage(msg("prefix") + " §c旧密码错误！"); return true; }
             if (a[1].length() < 4) { p.sendMessage(msg("prefix") + " §c新密码至少4个字符！"); return true; }
             passwords.put(p.getUniqueId(), hash(a[1]));
             data.getConfig().set(p.getUniqueId().toString(), hash(a[1]));

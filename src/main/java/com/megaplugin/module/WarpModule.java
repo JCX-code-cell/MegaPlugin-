@@ -4,6 +4,7 @@ import com.megaplugin.MegaPlugin;
 import com.megaplugin.util.DataFile;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.command.*;
 import org.bukkit.entity.Player;
@@ -33,6 +34,7 @@ public class WarpModule extends MegaModule {
         cmd("warp", new WarpCmd());
         cmd("delwarp", new DelwarpCmd());
         cmd("warps", new WarpsCmd());
+        Bukkit.getScheduler().runTaskTimer(plugin, data::save, 6000L, 6000L);
     }
 
     @Override
