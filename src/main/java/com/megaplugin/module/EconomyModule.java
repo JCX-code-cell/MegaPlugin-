@@ -60,9 +60,15 @@ public class EconomyModule extends MegaModule {
     public void setBalance(Player player, double amount) {
         balances.put(player.getUniqueId(), Math.max(0, Math.round(amount * 100.0) / 100.0));
     }
+    public void setBalance(UUID uuid, double amount) {
+        balances.put(uuid, Math.max(0, Math.round(amount * 100.0) / 100.0));
+    }
 
     public boolean hasEnough(Player player, double amount) {
         return getBalance(player) >= amount;
+    }
+    public boolean hasEnough(UUID uuid, double amount) {
+        return getBalance(uuid) >= amount;
     }
 
     public boolean deposit(Player player, double amount) {
@@ -70,10 +76,19 @@ public class EconomyModule extends MegaModule {
         setBalance(player, current + amount);
         return true;
     }
+    public boolean deposit(UUID uuid, double amount) {
+        balances.put(uuid, Math.max(0, Math.round(getBalance(uuid) + amount) * 100.0 / 100.0));
+        return true;
+    }
 
     public boolean withdraw(Player player, double amount) {
         if (!hasEnough(player, amount)) return false;
         setBalance(player, getBalance(player) - amount);
+        return true;
+    }
+    public boolean withdraw(UUID uuid, double amount) {
+        if (!hasEnough(uuid, amount)) return false;
+        setBalance(uuid, getBalance(uuid) - amount);
         return true;
     }
 
