@@ -31,7 +31,6 @@ public final class MegaPlugin extends JavaPlugin {
         registerModule(new BindModule(this));
         registerModule(new MarketModule(this));
         registerModule(new AuthModule(this));
-        registerModule(new AntiCheatModule(this));
         registerModule(new RTPModule(this));
 
         getLogger().info("MegaPlugin v1.0.0 enabled! " + modules.size() + " modules loaded.");

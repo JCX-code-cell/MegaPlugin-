@@ -13,6 +13,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryType;
+import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -99,6 +100,16 @@ public class MenuModule extends MegaModule {
     @EventHandler
     public void onInventoryDrag(InventoryDragEvent e) {
         if (e.getView().getTitle().equals(MENU_TITLE)) e.setCancelled(true);
+    }
+
+    /** Shift+F (sneak + swap hands) → 打开菜单 */
+    @EventHandler
+    public void onSwapHands(PlayerSwapHandItemsEvent e) {
+        Player p = e.getPlayer();
+        if (p.isSneaking()) {
+            e.setCancelled(true);
+            openMenu(p);
+        }
     }
 
     private class MenuCmd implements CommandExecutor {
