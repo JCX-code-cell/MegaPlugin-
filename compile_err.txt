@@ -1,0 +1,445 @@
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:11: 错误: 程序包org.bukkit.block不存在
+import org.bukkit.block.Block;
+                       ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:12: 错误: 程序包org.bukkit.block不存在
+import org.bukkit.block.BlockState;
+                       ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:13: 错误: 程序包org.bukkit.block.data.type不存在
+import org.bukkit.block.data.type.Chest;
+                                 ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:14: 错误: 程序包org.bukkit.block.data.type不存在
+import org.bukkit.block.data.type.Dispenser;
+                                 ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:15: 错误: 程序包org.bukkit.command不存在
+import org.bukkit.command.Command;
+                         ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:16: 错误: 程序包org.bukkit.command不存在
+import org.bukkit.command.CommandExecutor;
+                         ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:17: 错误: 程序包org.bukkit.command不存在
+import org.bukkit.command.CommandSender;
+                         ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:18: 错误: 程序包org.bukkit.command不存在
+import org.bukkit.command.TabCompleter;
+                         ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:20: 错误: 程序包org.bukkit.event不存在
+import org.bukkit.event.EventHandler;
+                       ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:21: 错误: 程序包org.bukkit.event不存在
+import org.bukkit.event.EventPriority;
+                       ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:22: 错误: 程序包org.bukkit.event不存在
+import org.bukkit.event.Listener;
+                       ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:25: 错误: 程序包org.bukkit.event.hanging不存在
+import org.bukkit.event.hanging.HangingBreakByEntityEvent;
+                               ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:26: 错误: 程序包org.bukkit.event.hanging不存在
+import org.bukkit.event.hanging.HangingPlaceEvent;
+                               ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:27: 错误: 程序包org.bukkit.event.inventory不存在
+import org.bukkit.event.inventory.InventoryClickEvent;
+                                 ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:28: 错误: 程序包org.bukkit.event.inventory不存在
+import org.bukkit.event.inventory.InventoryDragEvent;
+                                 ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:30: 错误: 程序包org.bukkit.event.vehicle不存在
+import org.bukkit.event.vehicle.VehicleDamageEvent;
+                               ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:31: 错误: 程序包org.bukkit.event.vehicle不存在
+import org.bukkit.event.vehicle.VehicleDestroyEvent;
+                               ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:32: 错误: 程序包org.bukkit.event.world不存在
+import org.bukkit.event.world.StructureGrowEvent;
+                             ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:33: 错误: 程序包org.bukkit.inventory不存在
+import org.bukkit.inventory.Inventory;
+                           ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:34: 错误: 程序包org.bukkit.inventory不存在
+import org.bukkit.inventory.InventoryHolder;
+                           ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:35: 错误: 程序包org.bukkit.inventory不存在
+import org.bukkit.inventory.ItemStack;
+                           ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:36: 错误: 程序包org.bukkit.inventory.meta不存在
+import org.bukkit.inventory.meta.ItemMeta;
+                                ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:37: 错误: 程序包org.bukkit.projectiles不存在
+import org.bukkit.projectiles.ProjectileSource;
+                             ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:62: 错误: 无法访问Listener
+public class ClaimModule extends MegaModule {
+                                 ^
+  找不到org.bukkit.event.Listener的类文件
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:107: 错误: 找不到符号
+    private final Map<UUID, Location[]> selections = new HashMap<>();     // 选区
+                            ^
+  符号:   类 Location
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:326: 错误: 找不到符号
+    private Claim getClaimAt(Location loc, PlayerData pd) {
+                             ^
+  符号:   类 Location
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:358: 错误: 找不到符号
+    private String checkProtection(Player p, Location loc, Perm required) {
+                                   ^
+  符号:   类 Player
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:358: 错误: 找不到符号
+    private String checkProtection(Player p, Location loc, Perm required) {
+                                             ^
+  符号:   类 Location
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:385: 错误: 找不到符号
+    private boolean isContainer(Material m) {
+                                ^
+  符号:   类 Material
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:395: 错误: 找不到符号
+    private boolean isAccessBlock(Material m) {
+                                  ^
+  符号:   类 Material
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:407: 错误: 找不到符号
+    public void onSelect(PlayerInteractEvent e) {
+                         ^
+  符号:   类 PlayerInteractEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:435: 错误: 找不到符号
+    public void onBreak(BlockBreakEvent e) {
+                        ^
+  符号:   类 BlockBreakEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:446: 错误: 找不到符号
+    public void onPlace(BlockPlaceEvent e) {
+                        ^
+  符号:   类 BlockPlaceEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:457: 错误: 找不到符号
+    public void onInteract(PlayerInteractEvent e) {
+                           ^
+  符号:   类 PlayerInteractEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:537: 错误: 找不到符号
+    public void onPvp(EntityDamageByEntityEvent e) {
+                      ^
+  符号:   类 EntityDamageByEntityEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:560: 错误: 找不到符号
+    public void onPve(EntityDamageByEntityEvent e) {
+                      ^
+  符号:   类 EntityDamageByEntityEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:580: 错误: 找不到符号
+    public void onExplode(EntityExplodeEvent e) {
+                          ^
+  符号:   类 EntityExplodeEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:593: 错误: 找不到符号
+    public void onBlockExplode(BlockExplodeEvent e) {
+                               ^
+  符号:   类 BlockExplodeEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:606: 错误: 找不到符号
+    public void onIgnite(BlockIgniteEvent e) {
+                         ^
+  符号:   类 BlockIgniteEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:617: 错误: 找不到符号
+    public void onBurn(BlockBurnEvent e) {
+                       ^
+  符号:   类 BlockBurnEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:624: 错误: 找不到符号
+    public void onSpawn(CreatureSpawnEvent e) {
+                        ^
+  符号:   类 CreatureSpawnEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:635: 错误: 找不到符号
+    public void onGrow(StructureGrowEvent e) {
+                       ^
+  符号:   类 StructureGrowEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:645: 错误: 找不到符号
+    public void onFlow(BlockFromToEvent e) {
+                       ^
+  符号:   类 BlockFromToEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:655: 错误: 找不到符号
+    public void onPiston(BlockPistonExtendEvent e) {
+                         ^
+  符号:   类 BlockPistonExtendEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:664: 错误: 找不到符号
+    public void onPistonRetract(BlockPistonRetractEvent e) {
+                                ^
+  符号:   类 BlockPistonRetractEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:674: 错误: 找不到符号
+    public void onPearl(PlayerTeleportEvent e) {
+                        ^
+  符号:   类 PlayerTeleportEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:682: 错误: 找不到符号
+    public void onDrop(PlayerDropItemEvent e) {
+                       ^
+  符号:   类 PlayerDropItemEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:688: 错误: 找不到符号
+    public void onPickup(PlayerAttemptPickupItemEvent e) {
+                         ^
+  符号:   类 PlayerAttemptPickupItemEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:695: 错误: 找不到符号
+    public void onHangingBreak(HangingBreakByEntityEvent e) {
+                               ^
+  符号:   类 HangingBreakByEntityEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:702: 错误: 找不到符号
+    public void onHangingPlace(HangingPlaceEvent e) {
+                               ^
+  符号:   类 HangingPlaceEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:710: 错误: 找不到符号
+    public void onArmorStand(EntityDamageByEntityEvent e) {
+                             ^
+  符号:   类 EntityDamageByEntityEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:723: 错误: 找不到符号
+    public void onAnimalHurt(EntityDamageByEntityEvent e) {
+                             ^
+  符号:   类 EntityDamageByEntityEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:738: 错误: 找不到符号
+    public void onVehicle(VehicleDestroyEvent e) {
+                          ^
+  符号:   类 VehicleDestroyEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:746: 错误: 找不到符号
+    public void onBucket(PlayerBucketEmptyEvent e) {
+                         ^
+  符号:   类 PlayerBucketEmptyEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:752: 错误: 找不到符号
+    public void onBucketFill(PlayerBucketFillEvent e) {
+                             ^
+  符号:   类 PlayerBucketFillEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:759: 错误: 找不到符号
+    public void onEntityChangeBlock(EntityChangeBlockEvent e) {
+                                    ^
+  符号:   类 EntityChangeBlockEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:769: 错误: 找不到符号
+    public void onMoveBanned(PlayerMoveEvent e) {
+                             ^
+  符号:   类 PlayerMoveEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:788: 错误: 找不到符号
+    public void onMove(PlayerMoveEvent e) {
+                       ^
+  符号:   类 PlayerMoveEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:837: 错误: 找不到符号
+    private void showClaimParticles(Player p, Claim c) {
+                                    ^
+  符号:   类 Player
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:850: 错误: 找不到符号
+    private void spawnPt(Player p, Particle pt, int x, int y, int z) {
+                         ^
+  符号:   类 Player
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:850: 错误: 找不到符号
+    private void spawnPt(Player p, Particle pt, int x, int y, int z) {
+                                   ^
+  符号:   类 Particle
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1141: 错误: 找不到符号
+    public void openMainGui(Player p) {
+                            ^
+  符号:   类 Player
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1165: 错误: 找不到符号
+    private void openSettingsGui(Player p, Claim c) {
+                                 ^
+  符号:   类 Player
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1179: 错误: 找不到符号
+    private void openMemberGui(Player p, Claim c) {
+                               ^
+  符号:   类 Player
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1205: 错误: 找不到符号
+    private void openMapGui(Player p) {
+                            ^
+  符号:   类 Player
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1233: 错误: 找不到符号
+    private void openBuyGui(Player p) {
+                            ^
+  符号:   类 Player
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1249: 错误: 找不到符号
+    public void onGuiClick(InventoryClickEvent e) {
+                           ^
+  符号:   类 InventoryClickEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1268: 错误: 找不到符号
+    private void handleMainGui(Player p, String name, InventoryClickEvent e) {
+                               ^
+  符号:   类 Player
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1268: 错误: 找不到符号
+    private void handleMainGui(Player p, String name, InventoryClickEvent e) {
+                                                      ^
+  符号:   类 InventoryClickEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1285: 错误: 找不到符号
+    private void handleSettingsGui(Player p, String name) {
+                                   ^
+  符号:   类 Player
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1308: 错误: 找不到符号
+    private void handleMemberGui(Player p, String name, InventoryClickEvent e) {
+                                 ^
+  符号:   类 Player
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1308: 错误: 找不到符号
+    private void handleMemberGui(Player p, String name, InventoryClickEvent e) {
+                                                        ^
+  符号:   类 InventoryClickEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1325: 错误: 找不到符号
+    private void handleMapGui(Player p, String name) {
+                              ^
+  符号:   类 Player
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1331: 错误: 找不到符号
+    public void onGuiDrag(InventoryDragEvent e) {
+                          ^
+  符号:   类 InventoryDragEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1338: 错误: 找不到符号
+    public void onQuit(PlayerQuitEvent e) {
+                       ^
+  符号:   类 PlayerQuitEvent
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1345: 错误: 找不到符号
+    private ItemStack createItem(Material mat, String name, String... lore) {
+                                 ^
+  符号:   类 Material
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1345: 错误: 找不到符号
+    private ItemStack createItem(Material mat, String name, String... lore) {
+            ^
+  符号:   类 ItemStack
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1352: 错误: 找不到符号
+    private void fillGlass(Inventory inv, int from, int to) {
+                           ^
+  符号:   类 Inventory
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:127: 错误: 找不到符号
+        public Location spawn;
+               ^
+  符号:   类 Location
+  位置: 类 Claim
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:142: 错误: 找不到符号
+        public boolean contains(Location loc) {
+                                ^
+  符号:   类 Location
+  位置: 类 Claim
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:10: 错误: 程序包org.bukkit不存在
+import org.bukkit.*;
+          ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:19: 错误: 程序包org.bukkit.entity不存在
+import org.bukkit.entity.*;
+                 ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:23: 错误: 程序包org.bukkit.event.block不存在
+import org.bukkit.event.block.*;
+                       ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:24: 错误: 程序包org.bukkit.event.entity不存在
+import org.bukkit.event.entity.*;
+                       ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:29: 错误: 程序包org.bukkit.event.player不存在
+import org.bukkit.event.player.*;
+                       ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:860: 错误: 找不到符号
+    private class ClaimCmd implements CommandExecutor {
+                                      ^
+  符号:   类 CommandExecutor
+  位置: 类 ClaimModule
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:862: 错误: 找不到符号
+        public boolean onCommand(CommandSender s, Command cmd, String l, String[] a) {
+                                 ^
+  符号:   类 CommandSender
+  位置: 类 ClaimModule.ClaimCmd
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:862: 错误: 找不到符号
+        public boolean onCommand(CommandSender s, Command cmd, String l, String[] a) {
+                                                  ^
+  符号:   类 Command
+  位置: 类 ClaimModule.ClaimCmd
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:889: 错误: 找不到符号
+        private void doCreate(Player p, String[] a) {
+                              ^
+  符号:   类 Player
+  位置: 类 ClaimModule.ClaimCmd
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:931: 错误: 找不到符号
+        private void doInvite(Player p, String[] a) {
+                              ^
+  符号:   类 Player
+  位置: 类 ClaimModule.ClaimCmd
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:948: 错误: 找不到符号
+        private void doPromote(Player p, String[] a) {
+                               ^
+  符号:   类 Player
+  位置: 类 ClaimModule.ClaimCmd
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:972: 错误: 找不到符号
+        private void doKick(Player p, String[] a) {
+                            ^
+  符号:   类 Player
+  位置: 类 ClaimModule.ClaimCmd
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:987: 错误: 找不到符号
+        private void doBan(Player p, String[] a) { p.sendMessage(msg("prefix") + " §7功能已简化，使用 /claim kick 移除成员"); }
+                           ^
+  符号:   类 Player
+  位置: 类 ClaimModule.ClaimCmd
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:988: 错误: 找不到符号
+        private void doUnban(Player p, String[] a) { p.sendMessage(msg("prefix") + " §7功能已简化，使用 /claim invite 添加成员"); }
+                             ^
+  符号:   类 Player
+  位置: 类 ClaimModule.ClaimCmd
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:990: 错误: 找不到符号
+        private void doRemove(Player p, String[] a) {
+                              ^
+  符号:   类 Player
+  位置: 类 ClaimModule.ClaimCmd
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1001: 错误: 找不到符号
+        private void doRename(Player p, String[] a) {
+                              ^
+  符号:   类 Player
+  位置: 类 ClaimModule.ClaimCmd
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1015: 错误: 找不到符号
+        private void doSetmsg(Player p, String[] a) {
+                              ^
+  符号:   类 Player
+  位置: 类 ClaimModule.ClaimCmd
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1029: 错误: 找不到符号
+        private void doSell(Player p, String[] a) {
+                            ^
+  符号:   类 Player
+  位置: 类 ClaimModule.ClaimCmd
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1044: 错误: 找不到符号
+        private void doBuy(Player p, String[] a) {
+                           ^
+  符号:   类 Player
+  位置: 类 ClaimModule.ClaimCmd
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:1066: 错误: 找不到符号
+        private void doTp(Player p, String[] a) {
+                          ^
+  符号:   类 Player
+  位置: 类 ClaimModule.ClaimCmd
+100 个错误
+仅显示前 100 个错误（共 376 个）；若要查看更多错误，请使用 -Xmaxerrs

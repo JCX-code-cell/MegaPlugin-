@@ -1,0 +1,17 @@
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:11: 错误: 程序包org.bukkit.block不存在
+import org.bukkit.block.Block;
+                       ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:12: 错误: 程序包org.bukkit.block不存在
+import org.bukkit.block.BlockState;
+                       ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:13: 错误: 程序包org.bukkit.block.data.type不存在
+import org.bukkit.block.data.type.Chest;
+                                 ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:14: 错误: 程序包org.bukkit.block.data.type不存在
+import org.bukkit.block.data.type.Dispenser;
+                                 ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:15: 错误: 程序包org.bukkit.command不存在
+import org.bukkit.command.Command;
+                         ^
+5 个错误
+仅显示前 5 个错误（共 376 个）；若要查看更多错误，请使用 -Xmaxerrs

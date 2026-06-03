@@ -1,12 +1,17 @@
 package com.megaplugin.module;
 
 import com.megaplugin.MegaPlugin;
+import com.megaplugin.util.Color;
 import com.megaplugin.util.DataFile;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import net.kyori.adventure.title.Title;
 import org.bukkit.*;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockState;
+import org.bukkit.block.data.type.Chest;
+import org.bukkit.block.data.type.Dispenser;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -14,6 +19,7 @@ import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.*;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
 import org.bukkit.event.block.*;
 import org.bukkit.event.entity.*;
 import org.bukkit.event.hanging.HangingBreakByEntityEvent;
@@ -25,143 +31,157 @@ import org.bukkit.event.vehicle.VehicleDamageEvent;
 import org.bukkit.event.vehicle.VehicleDestroyEvent;
 import org.bukkit.event.world.StructureGrowEvent;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.projectiles.ProjectileSource;
 
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
- * 领地系统 v3 - 参照 GriefPrevention 设计
+ * 领地系统 v4 — 基于 GriefPrevention 源码架构重写
  *
- * 核心改进:
- * 1. unified checkPermission() 统一权限检查入口
- * 2. 选区工具优先级 LOWEST, 领地保护 HIGH, 互不冲突
- * 3. 合并冲突事件处理器（onTp/onPearl合一）
- * 4. 修复 onBed/onMount/onPve 权限检查bug
- * 5. 添加 megaplugin.claim.admin 权限支持
- * 6. 移除冲突/重复/多余的事件处理
+ * 核心架构 (对照 GP):
+ * ┌─ EventHandler ── checkProtection(player, loc, perm) ─────┐
+ * │                          │                               │
+ * │                    ┌──────▼──────────┐                   │
+ * │                    │ 1. world enabled?│                  │
+ * │                    │ 2. ignoreClaims? │← admin bypass    │
+ * │                    │ 3. getClaimAt()  │← chunk hash 索引  │
+ * │                    │ 4. claim.check() │← 权限层级检查      │
+ * │                    └──────┬──────────┘                   │
+ * │                     null=允许 / msg=拒绝                   │
+ * └─────────────────────────────────────────────────────────┘
+ *
+ * 权限层级: OWNER > MANAGE > BUILD > CONTAINER > ACCESS
+ * (对照 GP: Edit > Manage > Build > Container > Access)
  */
 public class ClaimModule extends MegaModule {
 
-    private static final String GUI_MAIN      = "§8§l[ §a§l我的领地 §8§l]";
-    private static final String GUI_SETTINGS  = "§8§l[ §e§l领地设置 §8§l]";
-    private static final String GUI_MEMBERS   = "§8§l[ §b§l成员管理 §8§l]";
-    private static final String GUI_MAP       = "§8§l[ §d§l领地地图 §8§l]";
-    private static final String GUI_BUY       = "§8§l[ §2§l领地商店 §8§l]";
+    // ── GUI 标题 ──
+    private static final String GUI_MAIN     = "§8§l[ §a§l我的领地 §8§l]";
+    private static final String GUI_SETTINGS = "§8§l[ §e§l领地设置 §8§l]";
+    private static final String GUI_MEMBERS  = "§8§l[ §b§l成员管理 §8§l]";
+    private static final String GUI_MAP      = "§8§l[ §d§l领地地图 §8§l]";
+    private static final String GUI_BUY      = "§8§l[ §2§l领地商店 §8§l]";
 
     private static final int MAX_CLAIMS = 5;
     private static final int MAX_CLAIM_SIZE = 64;
 
-    private final DataFile data;
-    private final Map<String, Claim> claims = new HashMap<>();
-    private final Map<UUID, Location[]> selections = new HashMap<>();
-    private final Map<UUID, String> lastClaim = new HashMap<>();
-    private final Map<UUID, String> currentClaim = new HashMap<>();
-    private final Map<UUID, Long> lastParticle = new HashMap<>();
+    // ════════════════════════════════════════
+    //  权限层级 (对照 GP ClaimPermission)
+    // ════════════════════════════════════════
+    /** Edit(OWENR) > Manage > Build > Container > Access */
+    public enum Perm {
+        ACCESS,      // 开门/按钮/拉杆/床  (GP: Access)
+        CONTAINER,   // 容器/铁砧/动物     (GP: Container, includes Access)
+        BUILD,       // 建造/破坏          (GP: Build, includes Container+Access)
+        MANAGE,      // 管理成员/设置       (GP: Manage, includes Build+Container+Access)
+        OWNER;       // 一切权限           (GP: Edit, not grantable)
 
-    // ── 权限标志 (参照 GriefPrevention 的 ClaimPermission) ──
-    public enum Flag {
-        BUILD("建造", Material.GRASS_BLOCK, true),
-        BREAK("破坏", Material.IRON_PICKAXE, true),
-        INTERACT("交互", Material.OAK_DOOR, true),
-        CONTAINER("容器", Material.CHEST, true),
-        PVP("PVP", Material.DIAMOND_SWORD, false),
-        PVE("怪物伤害", Material.ZOMBIE_HEAD, false),
-        MOB_SPAWN("怪物生成", Material.SPAWNER, false),
-        ANIMAL_SPAWN("动物生成", Material.WHEAT, true),
-        FIRE("火焰", Material.FLINT_AND_STEEL, false),
-        EXPLOSION("爆炸", Material.TNT, false),
-        PISTON("活塞", Material.PISTON, true),
-        WATER_FLOW("水流", Material.WATER_BUCKET, true),
-        LAVA_FLOW("岩浆流", Material.LAVA_BUCKET, false),
-        GROWTH("植物生长", Material.WHEAT_SEEDS, true),
-        TRAMPLE("踩踏农田", Material.FARMLAND, false),
-        DROP_ITEM("丢弃物品", Material.ARROW, true),
-        PICKUP_ITEM("拾取物品", Material.HOPPER, true),
-        USE_BED("使用床", Material.RED_BED, true),
-        USE_ANVIL("使用铁砧", Material.ANVIL, true),
-        USE_FISHING("钓鱼", Material.FISHING_ROD, true),
-        USE_NOTE("音符盒", Material.NOTE_BLOCK, true),
-        USE_PROJECTILE("投掷物", Material.BOW, true),
-        USE_VEHICLE("骑乘载具", Material.SADDLE, true),
-        USE_ENDER_PEARL("末影珍珠", Material.ENDER_PEARL, true),
-        TELEPORT("允许传送进入", Material.ENDER_EYE, true),
-        HURT_ANIMAL("伤害动物", Material.BEEF, false),
-        FRAME("展示框/画", Material.ITEM_FRAME, true),
-        ARMOR_STAND("盔甲架", Material.ARMOR_STAND, true),
-        REDSTONE("红石", Material.REDSTONE, true),
-        SIGN_EDIT("编辑告示牌", Material.OAK_SIGN, true),
-        BUCKET("使用桶", Material.BUCKET, true),
-        LEASH("拴绳", Material.LEAD, true),
-        SHEAR("剪羊毛", Material.SHEARS, true),
-        EAT_CAKE("吃蛋糕", Material.CAKE, true),
-        ;
+        /** 当前权限是否被对方权限授予 (include 低层级) */
+        public boolean isGrantedBy(Perm other) {
+            return other != null && other.ordinal() <= this.ordinal();
+        }
 
-        public final String display;
-        public final Material icon;
-        public final boolean def;
-        Flag(String display, Material icon, boolean def) { this.display = display; this.icon = icon; this.def = def; }
+        public String display() {
+            return switch(this) {
+                case OWNER -> "主人"; case MANAGE -> "管理";
+                case BUILD -> "建筑"; case CONTAINER -> "容器";
+                case ACCESS -> "访客";
+            };
+        }
     }
 
-    public enum Role { OWNER, ADMIN, MEMBER, BANNED }
+    // ════════════════════════════════════════
+    //  数据
+    // ════════════════════════════════════════
+    private final DataFile data;
+    private final Map<String, Claim> claims = new LinkedHashMap<>();       // id → claim
+    private final Map<Long, List<Claim>> chunkIndex = new ConcurrentHashMap<>(); // chunkHash → claims
+    private final Map<UUID, PlayerData> playerDataMap = new ConcurrentHashMap<>(); // 玩家缓存
+
+    private final Map<UUID, Location[]> selections = new HashMap<>();     // 选区
+    private final Map<UUID, String> lastClaimId = new HashMap<>();        // GUI 上下文
+    private final Map<UUID, String> currentClaim = new HashMap<>();       // 进出检测
+    private final Map<UUID, Long> lastParticle = new HashMap<>();         // 粒子冷却
+
+    // ── 玩家数据 (对照 GP PlayerData) ──
+    private static class PlayerData {
+        Claim lastClaim;
+        boolean ignoreClaims; // 管理员模式，跳过所有领地保护
+        Set<UUID> invitedBy = new HashSet<>();
+    }
 
     // ════════════════════════════════════════
-    //  领地数据模型
+    //  领地模型 (简化自 GP Claim)
     // ════════════════════════════════════════
-
     public static class Claim {
         public String id, name, world, enterMsg = "", leaveMsg = "";
         public UUID owner;
         public String ownerName;
-        public int minX, minY = 0, minZ, maxX, maxY = 255, maxZ;
+        public int minX, minY = -64, minZ, maxX, maxY = 319, maxZ;
         public Location spawn;
         public double price = 0;
-        public final Map<UUID, Role> members = new LinkedHashMap<>();
-        public final Map<String, Boolean> flags = new LinkedHashMap<>();
+        public boolean allowExplosions = false;
+
+        /** 显式权限映射: UUID字符串 → Perm */
+        public final Map<String, Perm> perms = new LinkedHashMap<>();
 
         public Claim() {}
         public Claim(String id, String name, UUID owner, String ownerName, String world,
                      int minX, int minZ, int maxX, int maxZ) {
             this.id = id; this.name = name; this.owner = owner; this.ownerName = ownerName;
             this.world = world; this.minX = minX; this.minZ = minZ; this.maxX = maxX; this.maxZ = maxZ;
-            for (Flag f : Flag.values()) flags.put(f.name(), f.def);
         }
 
-        public boolean getFlag(Flag f) { return flags.getOrDefault(f.name(), f.def); }
-        public void setFlag(Flag f, boolean v) { flags.put(f.name(), v); }
-        public void toggle(Flag f) { setFlag(f, !getFlag(f)); }
-
+        /** 检查位置是否在领地内 */
         public boolean contains(Location loc) {
             return loc.getWorld() != null && loc.getWorld().getName().equals(world)
                     && loc.getBlockX() >= minX && loc.getBlockX() <= maxX
+                    && loc.getBlockY() >= minY && loc.getBlockY() <= maxY
                     && loc.getBlockZ() >= minZ && loc.getBlockZ() <= maxZ;
         }
 
-        public Role getRole(UUID uid) {
-            if (owner.equals(uid)) return Role.OWNER;
-            return members.getOrDefault(uid, null);
+        /** 获取玩家的显式权限 */
+        public Perm getPermission(UUID uid) {
+            if (owner.equals(uid)) return Perm.OWNER;
+            return perms.get(uid.toString());
         }
 
-        /** 权限检查 (参照 GriefPrevention checkPermission) */
-        public boolean can(UUID uid, Flag flag) {
-            Role r = getRole(uid);
-            if (r == Role.OWNER || r == Role.ADMIN) return true;
-            if (r == Role.BANNED) return false;
-            return getFlag(flag);
+        public boolean isOwnerOrAbove(UUID uid, Perm required) {
+            Perm has = getPermission(uid);
+            return has != null && required.isGrantedBy(has);
         }
 
-        public boolean isAdmin(UUID uid) {
-            Role r = getRole(uid);
-            return r == Role.OWNER || r == Role.ADMIN;
+        /**
+         * 核心权限检查 (对照 GP Claim.checkPermission)
+         *
+         * @return null = 允许; String = 拒绝原因
+         */
+        public String checkPermission(UUID uid, String playerName, Perm required) {
+            // 1. 主人无条件允许
+            if (owner.equals(uid)) return null;
+
+            // 2. 检查显式授予的权限 (MANAGE包含BUILD, BUILD包含CONTAINER等)
+            Perm has = getPermission(uid);
+            if (has != null && required.isGrantedBy(has)) return null;
+
+            // 3. 公开权限
+            Perm pub = perms.get("__public__");
+            if (pub != null && required.isGrantedBy(pub)) return null;
+
+            // 4. 拒绝
+            return "§c你没有 " + required.display() + " 权限！领地主人: §e" + ownerName;
         }
     }
 
     // ════════════════════════════════════════
     //  初始化
     // ════════════════════════════════════════
-
     public ClaimModule(MegaPlugin plugin) {
         super(plugin);
         data = new DataFile(plugin, "claims_v2.yml");
@@ -169,15 +189,21 @@ public class ClaimModule extends MegaModule {
 
     @Override
     public void onEnable() {
-        registerListener();
         loadClaims();
+        rebuildChunkIndex();
+        registerListener();
         var cmd = plugin.getCommand("claim");
         if (cmd != null) { cmd.setExecutor(new ClaimCmd()); cmd.setTabCompleter(new ClaimTab()); }
+        plugin.getLogger().info("[Claim] v4 加载完成 (" + claims.size() + " 个领地, 基于 GriefPrevention 架构)");
     }
 
     @Override
-    public void onDisable() { saveAll(); }
+    public void onDisable() {
+        saveAll();
+        playerDataMap.clear();
+    }
 
+    // ── 数据加载/保存 ──
     private void loadClaims() {
         migrateOldData();
         var cfg = data.getConfig();
@@ -191,24 +217,25 @@ public class ClaimModule extends MegaModule {
                 c.world = cfg.getString(key + ".world", "world");
                 c.minX = cfg.getInt(key + ".minX"); c.minZ = cfg.getInt(key + ".minZ");
                 c.maxX = cfg.getInt(key + ".maxX"); c.maxZ = cfg.getInt(key + ".maxZ");
-                c.minY = cfg.getInt(key + ".minY", 0); c.maxY = cfg.getInt(key + ".maxY", 255);
+                c.minY = cfg.getInt(key + ".minY", -64); c.maxY = cfg.getInt(key + ".maxY", 319);
                 c.enterMsg = cfg.getString(key + ".enterMsg", "");
                 c.leaveMsg = cfg.getString(key + ".leaveMsg", "");
                 c.price = cfg.getDouble(key + ".price", 0);
+                c.allowExplosions = cfg.getBoolean(key + ".allowExplosions", false);
                 if (cfg.contains(key + ".spawn")) {
                     var s = cfg.getConfigurationSection(key + ".spawn");
                     if (s != null) c.spawn = new Location(Bukkit.getWorld(s.getString("world", c.world)),
                             s.getDouble("x"), s.getDouble("y"), s.getDouble("z"),
                             (float) s.getDouble("yaw", 0), (float) s.getDouble("pitch", 0));
                 }
-                var fsec = cfg.getConfigurationSection(key + ".flags");
-                if (fsec != null) for (String fk : fsec.getKeys(false)) c.flags.put(fk, fsec.getBoolean(fk));
-                var msec = cfg.getConfigurationSection(key + ".members");
-                if (msec != null) for (String mk : msec.getKeys(false)) try {
-                    c.members.put(UUID.fromString(mk), Role.valueOf(msec.getString(mk, "MEMBER")));
-                } catch (Exception ignored) {}
+                var msec = cfg.getConfigurationSection(key + ".perms");
+                if (msec != null) for (String mk : msec.getKeys(false)) {
+                    try { c.perms.put(mk, Perm.valueOf(msec.getString(mk, "ACCESS"))); } catch (Exception ignored) {}
+                }
                 claims.put(key, c);
-            } catch (Exception e) { plugin.getLogger().warning("[Claim] 加载领地 " + key + " 失败: " + e.getMessage()); }
+            } catch (Exception e) {
+                plugin.getLogger().warning("[Claim] 加载领地 " + key + " 失败: " + e.getMessage());
+            }
         }
         plugin.getLogger().info("[Claim] 已加载 " + claims.size() + " 个领地");
     }
@@ -233,15 +260,20 @@ public class ClaimModule extends MegaModule {
                     c.maxX = sec.getInt(claimName + ".maxX"); c.maxZ = sec.getInt(claimName + ".maxZ");
                     c.enterMsg = sec.getString(claimName + ".enterMessage", "");
                     c.leaveMsg = sec.getString(claimName + ".leaveMessage", "");
-                    var fsec = sec.getConfigurationSection(claimName + ".flags");
-                    if (fsec != null) for (String fk : fsec.getKeys(false)) c.flags.put(fk, fsec.getBoolean(fk));
-                    for (String tid : sec.getStringList(claimName + ".trusted")) try { c.members.put(UUID.fromString(tid), Role.MEMBER); } catch (Exception ignored) {}
-                    for (String bid : sec.getStringList(claimName + ".banned")) try { c.members.put(UUID.fromString(bid), Role.BANNED); } catch (Exception ignored) {}
+                    for (String tid : sec.getStringList(claimName + ".trusted"))
+                        try { c.perms.put(tid, Perm.BUILD); } catch (Exception ignored) {}
+                    for (String bid : sec.getStringList(claimName + ".banned"))
+                        try { c.perms.put(bid, Perm.ACCESS); } catch (Exception ignored) {}
                     claims.put(id, c); migrated = true;
                 }
-            } catch (Exception e) { plugin.getLogger().warning("[Claim] 迁移旧数据失败: " + e.getMessage()); }
+            } catch (Exception e) {
+                plugin.getLogger().warning("[Claim] 迁移旧数据失败: " + e.getMessage());
+            }
         }
-        if (migrated) { plugin.getLogger().info("[Claim] 已从 claims.yml 迁移旧领地数据到 claims_v2.yml"); saveAll(); }
+        if (migrated) {
+            plugin.getLogger().info("[Claim] 已从 claims.yml 迁移旧领地数据到 claims_v2.yml");
+            saveAll();
+        }
     }
 
     private void saveAll() {
@@ -258,104 +290,138 @@ public class ClaimModule extends MegaModule {
             cfg.set(p + "enterMsg", c.enterMsg);
             cfg.set(p + "leaveMsg", c.leaveMsg);
             cfg.set(p + "price", c.price);
+            cfg.set(p + "allowExplosions", c.allowExplosions);
+            cfg.set(p + "perms", null); // 清空后重建
+            for (var e : c.perms.entrySet()) cfg.set(p + "perms." + e.getKey(), e.getValue().name());
             if (c.spawn != null) {
                 cfg.set(p + "spawn.world", c.spawn.getWorld().getName());
-                cfg.set(p + "spawn.x", c.spawn.getX()); cfg.set(p + "spawn.y", c.spawn.getY()); cfg.set(p + "spawn.z", c.spawn.getZ());
+                cfg.set(p + "spawn.x", c.spawn.getX()); cfg.set(p + "spawn.y", c.spawn.getY());
+                cfg.set(p + "spawn.z", c.spawn.getZ());
                 cfg.set(p + "spawn.yaw", c.spawn.getYaw()); cfg.set(p + "spawn.pitch", c.spawn.getPitch());
             }
-            for (var e : c.flags.entrySet()) cfg.set(p + "flags." + e.getKey(), e.getValue());
-            for (var e : c.members.entrySet()) cfg.set(p + "members." + e.getKey(), e.getValue().name());
         }
         data.save();
     }
 
     // ════════════════════════════════════════
-    //  工具方法
+    //  Chunk 索引 (对照 GP DataStore chunksToClaimsMap)
     // ════════════════════════════════════════
+    private static long chunkHash(int cx, int cz) {
+        return ((long)cz << 32) ^ cx;
+    }
 
-    private Claim getClaimAt(Location loc) {
-        if (loc == null || loc.getWorld() == null) return null;
+    private void rebuildChunkIndex() {
+        chunkIndex.clear();
         for (Claim c : claims.values()) {
-            if (c.contains(loc)) return c;
+            if (c.world == null) continue;
+            int minCX = c.minX >> 4, maxCX = c.maxX >> 4;
+            int minCZ = c.minZ >> 4, maxCZ = c.maxZ >> 4;
+            for (int cx = minCX; cx <= maxCX; cx++)
+                for (int cz = minCZ; cz <= maxCZ; cz++)
+                    chunkIndex.computeIfAbsent(chunkHash(cx, cz), k -> new ArrayList<>()).add(c);
+        }
+    }
+
+    /** 快速查找领地 (对照 GP DataStore.getClaimAt) */
+    private Claim getClaimAt(Location loc, PlayerData pd) {
+        if (loc == null || loc.getWorld() == null) return null;
+
+        // 先检查缓存
+        if (pd != null && pd.lastClaim != null && pd.lastClaim.contains(loc))
+            return pd.lastClaim;
+
+        World w = loc.getWorld();
+        int cx = loc.getBlockX() >> 4, cz = loc.getBlockZ() >> 4;
+        List<Claim> list = chunkIndex.get(chunkHash(cx, cz));
+        if (list == null) return null;
+
+        for (Claim c : list) {
+            if (c.world.equals(w.getName()) && c.contains(loc)) {
+                if (pd != null) pd.lastClaim = c;
+                return c;
+            }
         }
         return null;
     }
 
+    private PlayerData getPlayerData(UUID uid) {
+        return playerDataMap.computeIfAbsent(uid, k -> new PlayerData());
+    }
+
+    // ════════════════════════════════════════
+    //  核心保护入口 (对照 GP ProtectionHelper.checkPermission)
+    // ════════════════════════════════════════
+    /**
+     * 统一的领地保护检查
+     * @return null = 允许; String = 拒绝消息
+     */
+    private String checkProtection(Player p, Location loc, Perm required) {
+        if (loc == null || loc.getWorld() == null) return null;
+
+        PlayerData pd = getPlayerData(p.getUniqueId());
+
+        // 1. 管理员模式 (ignoreClaims)
+        if (p.hasPermission("megaplugin.claim.admin") || pd.ignoreClaims) return null;
+
+        // 2. 查找领地
+        Claim claim = getClaimAt(loc, pd);
+        if (claim == null) return null; // 荒野允许
+
+        // 3. 领地权限检查
+        return claim.checkPermission(p.getUniqueId(), p.getName(), required);
+    }
+
+    // ── 工具方法 ──
     private List<Claim> getPlayerClaims(UUID uid) {
         return claims.values().stream().filter(c -> c.owner.equals(uid)).collect(Collectors.toList());
     }
 
     private String nextId() {
-        int i = 1;
-        while (claims.containsKey("claim" + i)) i++;
+        int i = 1; while (claims.containsKey("claim" + i)) i++;
         return "claim" + i;
     }
 
-    /**
-     * 统一权限检查 (参照 GriefPrevention 的 checkPermission)
-     *
-     * 检查顺序:
-     * 1. 有 admin 权限 → 允许
-     * 2. 不在领地内 → 允许
-     * 3. OWNER/ADMIN → 允许
-     * 4. BANNED → 拒绝
-     * 5. MEMBER/陌生人 → 检查 flag
-     */
-    private boolean checkPermission(Player p, Location loc, Flag flag) {
-        if (p.hasPermission("megaplugin.claim.admin")) return true;
-        Claim c = getClaimAt(loc);
-        return c == null || c.can(p.getUniqueId(), flag);
-    }
-
-    private Claim getClaimAndCheck(Player p, Location loc, Flag flag) {
-        if (p.hasPermission("megaplugin.claim.admin")) return null;
-        Claim c = getClaimAt(loc);
-        if (c == null) return null;
-        if (c.isAdmin(p.getUniqueId())) return null;
-        return c;
-    }
-
-    // ── 容器/交互判断 ──
+    /** 判断是否为容器类方块 (对照 GP PlayerEventHandler.isInventoryHolder) */
     private boolean isContainer(Material m) {
-        return m.name().contains("CHEST") || m == Material.TRAPPED_CHEST || m == Material.BARREL
-                || m.name().contains("SHULKER_BOX") || m == Material.HOPPER || m == Material.DISPENSER
+        return Tag.SHULKER_BOXES.isTagged(m) || m == Material.CHEST || m == Material.TRAPPED_CHEST
+                || m == Material.BARREL || m == Material.HOPPER || m == Material.DISPENSER
                 || m == Material.DROPPER || m == Material.FURNACE || m == Material.BLAST_FURNACE
                 || m == Material.SMOKER || m == Material.BREWING_STAND || m == Material.JUKEBOX
-                || m == Material.ENCHANTING_TABLE || m == Material.ENDER_CHEST;
+                || m == Material.ENCHANTING_TABLE || m == Material.ENDER_CHEST
+                || m == Material.CRAFTER;
     }
-    private boolean isInteractable(Material m) {
-        return m.name().contains("DOOR") || m.name().contains("GATE") || m.name().contains("BUTTON")
-                || m.name().contains("LEVER") || m.name().contains("PRESSURE_PLATE")
-                || m == Material.NOTE_BLOCK || m == Material.BEACON || m == Material.LECTERN
-                || m == Material.DAYLIGHT_DETECTOR || m == Material.REPEATER || m == Material.COMPARATOR
-                || m.name().contains("TRAPDOOR") || m.name().contains("CANDLE") || m == Material.FLOWER_POT
-                || m == Material.CAKE
-                || m == Material.ANVIL || m == Material.CHIPPED_ANVIL || m == Material.DAMAGED_ANVIL;
+
+    /** 判断是否为门/活板门类 (对照 GP 的 ACCESS 权限块) */
+    private boolean isAccessBlock(Material m) {
+        return Tag.DOORS.isTagged(m) || Tag.TRAPDOORS.isTagged(m)
+                || Tag.FENCE_GATES.isTagged(m) || Tag.BEDS.isTagged(m)
+                || Tag.BUTTONS.isTagged(m) || m == Material.LEVER;
     }
 
     // ════════════════════════════════════════
-    //  事件保护 - 参照 GriefPrevention 架构
+    //  事件保护 — 基于 GriefPrevention 架构
     // ════════════════════════════════════════
 
-    // ── 选区工具 (优先级最低，不拦截领地保护事件) ──
+    // ── 选区工具 (LOWEST, 不拦截保护事件) ──
     @EventHandler(priority = EventPriority.LOWEST)
     public void onSelect(PlayerInteractEvent e) {
         Player p = e.getPlayer();
-        ItemStack hand = p.getInventory().getItemInMainHand();
-        if (hand.getType() != Material.WOODEN_AXE) return;
+        if (p.getInventory().getItemInMainHand().getType() != Material.WOODEN_AXE) return;
         Block b = e.getClickedBlock();
         if (b == null) return;
 
-        e.setCancelled(false); // 选区不受领地保护限制
+        // 木斧选区操作，不取消事件
         Location[] sel = selections.computeIfAbsent(p.getUniqueId(), k -> new Location[2]);
         if (e.getAction() == Action.LEFT_CLICK_BLOCK) {
             sel[0] = b.getLocation();
             p.sendMessage(msg("prefix") + " §a位置1: §e" + b.getX() + "§7, §e" + b.getY() + "§7, §e" + b.getZ());
             p.spawnParticle(Particle.HAPPY_VILLAGER, b.getLocation().add(0.5, 1.2, 0.5), 5, 0.3, 0.3, 0.3, 0);
+            e.setCancelled(false); // 不阻止木斧左键
         } else if (e.getAction() == Action.RIGHT_CLICK_BLOCK) {
             sel[1] = b.getLocation();
             p.sendMessage(msg("prefix") + " §a位置2: §e" + b.getX() + "§7, §e" + b.getY() + "§7, §e" + b.getZ());
             p.spawnParticle(Particle.HAPPY_VILLAGER, b.getLocation().add(0.5, 1.2, 0.5), 5, 0.3, 0.3, 0.3, 0);
+            e.setCancelled(false); // 不阻止木斧右键
             if (sel[0] != null) {
                 int dx = Math.abs(sel[1].getBlockX() - sel[0].getBlockX()) + 1;
                 int dz = Math.abs(sel[1].getBlockZ() - sel[0].getBlockZ()) + 1;
@@ -364,467 +430,406 @@ public class ClaimModule extends MegaModule {
         }
     }
 
-    // ── 方块破坏 ──
-    @EventHandler(priority = EventPriority.HIGH)
+    // ── 方块破坏 (对照 GP BlockEventHandler.onBlockBreak) ──
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onBreak(BlockBreakEvent e) {
         Player p = e.getPlayer();
-        Claim c = getClaimAndCheck(p, e.getBlock().getLocation(), Flag.BREAK);
-        if (c != null && !c.can(p.getUniqueId(), Flag.BREAK)) {
+        String deny = checkProtection(p, e.getBlock().getLocation(), Perm.BUILD);
+        if (deny != null) {
             e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止破坏方块！");
+            p.sendMessage(msg("prefix") + " " + deny);
         }
     }
 
-    // ── 方块放置 ──
-    @EventHandler(priority = EventPriority.HIGH)
+    // ── 方块放置 (对照 GP BlockEventHandler.onBlockPlace) ──
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onPlace(BlockPlaceEvent e) {
         Player p = e.getPlayer();
-        Claim c = getClaimAndCheck(p, e.getBlock().getLocation(), Flag.BUILD);
-        if (c != null && !c.can(p.getUniqueId(), Flag.BUILD)) {
+        String deny = checkProtection(p, e.getBlock().getLocation(), Perm.BUILD);
+        if (deny != null) {
             e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止放置方块！");
+            p.sendMessage(msg("prefix") + " " + deny);
         }
     }
 
-    // ── 方块交互 (统一入口, 参照 GP allowAccess/allowContainers) ──
-    @EventHandler(priority = EventPriority.HIGH)
+    // ── 方块交互 (对照 GP PlayerEventHandler.onPlayerInteract) ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onInteract(PlayerInteractEvent e) {
         Player p = e.getPlayer();
-        ItemStack hand = p.getInventory().getItemInMainHand();
-        if (hand.getType() == Material.WOODEN_AXE) return; // 木斧选区专用
+        if (p.getInventory().getItemInMainHand().getType() == Material.WOODEN_AXE) return; // 木斧
 
         Block b = e.getClickedBlock();
-        if (b == null) return;
-
-        Material m = b.getType();
-        Claim c = getClaimAt(b.getLocation());
-        if (c == null) return;
-        if (p.hasPermission("megaplugin.claim.admin")) return;
-        if (c.isAdmin(p.getUniqueId())) return;
-        UUID uid = p.getUniqueId();
-        if (c.getRole(uid) == Role.BANNED) { e.setCancelled(true); return; }
-
-        // 容器 (参照 GP CONTAINER 权限)
-        if (isContainer(m) && !c.can(uid, Flag.CONTAINER)) {
-            e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止打开容器！");
-            return;
-        }
-        // 交互 (参照 GP ACCESS 权限)
-        if (isInteractable(m) && !c.can(uid, Flag.INTERACT)) {
-            e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止交互！");
-            return;
-        }
-        // 农田踩踏
-        if (m == Material.FARMLAND && e.getAction() == Action.PHYSICAL && !c.getFlag(Flag.TRAMPLE)) {
-            e.setCancelled(true);
-        }
-    }
-
-    // ── 实体经济交互 (盔甲架放置/吃蛋糕已合入onInteract) ──
-
-    // ── PVP (玩家攻击玩家) ──
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onPvp(EntityDamageByEntityEvent e) {
-        if (!(e.getDamager() instanceof Player) || !(e.getEntity() instanceof Player victim)) return;
-        Claim c = getClaimAt(victim.getLocation());
-        if (c != null && !c.getFlag(Flag.PVP)) {
-            e.setCancelled(true);
-            ((Player) e.getDamager()).sendMessage(msg("prefix") + " §c此领地禁止 PVP！");
-        }
-    }
-
-    // ── PVE (怪物/环境伤害玩家; 参照 GP: 含弹射物) ──
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onPve(EntityDamageByEntityEvent e) {
-        if (!(e.getEntity() instanceof Player player)) return;
-        Entity damager = e.getDamager();
-
-        // 跳过玩家直接攻击 (已在onPvp处理)
-        if (damager instanceof Player) return;
-        // 处理弹射物(弓箭/药水/三叉戟)
-        if (damager instanceof Projectile proj) {
-            // 如果弹射物是玩家射出的, 也跳过 (可能是PVP)
-            if (proj.getShooter() instanceof Player) return;
-            // 怪物射出的弹射物(骷髅箭等)
-            Claim c = getClaimAt(player.getLocation());
-            if (c != null && !c.getFlag(Flag.PVE)) {
-                e.setCancelled(true);
+        if (b == null) {
+            // 右键空气 — 检查打火石
+            if (e.getAction() == Action.RIGHT_CLICK_AIR && e.getMaterial() == Material.FLINT_AND_STEEL) {
+                String deny = checkProtection(p, p.getLocation(), Perm.BUILD);
+                if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
             }
             return;
         }
-        // 怪物/环境伤害
-        if (!(damager instanceof Monster) && !(damager instanceof org.bukkit.entity.WaterMob)) return;
-        Claim c = getClaimAt(player.getLocation());
-        if (c != null && !c.getFlag(Flag.PVE)) {
+
+        Material m = b.getType();
+
+        // PHYSICAL — 踩踏农田/乌龟蛋
+        if (e.getAction() == Action.PHYSICAL) {
+            if (m == Material.FARMLAND || m == Material.TURTLE_EGG) {
+                String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
+                if (deny != null) e.setCancelled(true);
+            }
+            return;
+        }
+
+        // LEFT_CLICK_BLOCK — 仅对特定方块检查 (TNT, 音符盒)
+        if (e.getAction() == Action.LEFT_CLICK_BLOCK) {
+            if (m == Material.TNT || m == Material.NOTE_BLOCK) {
+                String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
+                if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
+            }
+            return;
+        }
+
+        // RIGHT_CLICK_BLOCK ─ 按 GP 分类处理
+        // 1. 容器类 → CONTAINER
+        if (isContainer(m)) {
+            String deny = checkProtection(p, b.getLocation(), Perm.CONTAINER);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
+            return;
+        }
+
+        // 2. 铁砧/信标/蛋糕/工作台类 → CONTAINER
+        if (m == Material.ANVIL || m == Material.CHIPPED_ANVIL || m == Material.DAMAGED_ANVIL
+                || m == Material.BEACON || m == Material.CRAFTER
+                || m == Material.CARTOGRAPHY_TABLE || m == Material.GRINDSTONE
+                || m == Material.LOOM || m == Material.STONECUTTER
+                || m == Material.SMITHING_TABLE || m == Material.FLETCHING_TABLE
+                || m == Material.CAULDRON || m == Material.WATER_CAULDRON || m == Material.LAVA_CAULDRON
+                || m == Material.BEEHIVE || m == Material.BEE_NEST
+                || m == Material.BELL || m == Material.COMPOSTER) {
+            String deny = checkProtection(p, b.getLocation(), Perm.CONTAINER);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
+            return;
+        }
+
+        // 3. 门/床/按钮/拉杆 → ACCESS
+        if (isAccessBlock(m)) {
+            String deny = checkProtection(p, b.getLocation(), Perm.ACCESS);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
+            return;
+        }
+
+        // 4. 红石/装饰 → BUILD
+        if (m == Material.REPEATER || m == Material.COMPARATOR || m == Material.DAYLIGHT_DETECTOR
+                || Tag.FLOWER_POTS.isTagged(m) || Tag.CANDLES.isTagged(m)) {
+            String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
+            return;
+        }
+
+        // 5. 告示牌编辑
+        if (Tag.ALL_SIGNS.isTagged(m)) {
+            String deny = checkProtection(p, b.getLocation(), Perm.BUILD);
+            if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
+        }
+    }
+
+    // ── PVP (对照 GP EntityDamageHandler.handlePvpDamageByPlayer) ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onPvp(EntityDamageByEntityEvent e) {
+        if (!(e.getEntity() instanceof Player victim)) return;
+
+        // 找出攻击者
+        Player attacker = null;
+        if (e.getDamager() instanceof Player p) attacker = p;
+        else if (e.getDamager() instanceof Projectile proj && proj.getShooter() instanceof Player p)
+            attacker = p;
+        if (attacker == null) return;
+
+        // 检查受害者位置 — PVP 需要 MANAGE 权限才允许 (仅主人/管理可PVP)
+        Claim c = getClaimAt(victim.getLocation(), null);
+        if (c != null) {
+            String deny = c.checkPermission(attacker.getUniqueId(), attacker.getName(), Perm.BUILD);
+            if (deny != null) { // 没有BUILD权限 → 不允许PVP
+                e.setCancelled(true);
+                attacker.sendMessage(msg("prefix") + " §c此领地禁止 PVP！");
+            }
+        }
+    }
+
+    // ── PVE (怪物伤害玩家; 对照 GP EntityDamageHandler) ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onPve(EntityDamageByEntityEvent e) {
+        if (!(e.getEntity() instanceof Player player)) return;
+        // 跳过玩家攻击(已在onPvp处理)
+        if (e.getDamager() instanceof Player) return;
+        if (e.getDamager() instanceof Projectile proj && proj.getShooter() instanceof Player) return;
+
+        // 只处理怪物伤害
+        if (!(e.getDamager() instanceof Monster) && !(e.getDamager() instanceof WaterMob)
+                && !(e.getDamager() instanceof Slime) && !(e.getDamager() instanceof Ghast)
+                && !(e.getDamager() instanceof Phantom)) return;
+
+        // 领地内怪物不能伤害有BUILD权限的人
+        Claim c = getClaimAt(player.getLocation(), null);
+        if (c != null && !c.isOwnerOrAbove(player.getUniqueId(), Perm.BUILD)) {
             e.setCancelled(true);
         }
     }
 
-    // ── 爆炸 ──
-    @EventHandler(priority = EventPriority.HIGH)
+    // ── 爆炸 (对照 GP EntityEventHandler.onEntityExplode) ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onExplode(EntityExplodeEvent e) {
-        Claim c = getClaimAt(e.getLocation());
-        if (c != null && !c.getFlag(Flag.EXPLOSION)) e.blockList().clear();
+        if (e.getLocation().getWorld() == null) return;
+        Claim c = getClaimAt(e.getLocation(), null);
+        if (c != null && !c.allowExplosions) {
+            e.blockList().removeIf(b -> {
+                Claim bc = getClaimAt(b.getLocation(), null);
+                return bc == c;
+            });
+            if (e.blockList().isEmpty()) e.setCancelled(true);
+        }
     }
-    @EventHandler(priority = EventPriority.HIGH)
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onBlockExplode(BlockExplodeEvent e) {
-        Claim c = getClaimAt(e.getBlock().getLocation());
-        if (c != null && !c.getFlag(Flag.EXPLOSION)) e.blockList().clear();
+        Claim c = getClaimAt(e.getBlock().getLocation(), null);
+        if (c != null && !c.allowExplosions) {
+            e.blockList().removeIf(b -> {
+                Claim bc = getClaimAt(b.getLocation(), null);
+                return bc == c;
+            });
+            if (e.blockList().isEmpty()) e.setCancelled(true);
+        }
     }
 
     // ── 火焰 ──
-    @EventHandler(priority = EventPriority.HIGH)
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onIgnite(BlockIgniteEvent e) {
-        Claim c = getClaimAt(e.getBlock().getLocation());
-        if (c != null && !c.getFlag(Flag.FIRE)) e.setCancelled(true);
+        String deny = null;
+        if (e.getPlayer() != null) deny = checkProtection(e.getPlayer(), e.getBlock().getLocation(), Perm.BUILD);
+        else {
+            Claim c = getClaimAt(e.getBlock().getLocation(), null);
+            if (c != null && !c.allowExplosions) deny = "§c领地禁止火焰蔓延";
+        }
+        if (deny != null) e.setCancelled(true);
     }
-    @EventHandler(priority = EventPriority.HIGH)
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onBurn(BlockBurnEvent e) {
-        Claim c = getClaimAt(e.getBlock().getLocation());
-        if (c != null && !c.getFlag(Flag.FIRE)) e.setCancelled(true);
+        Claim c = getClaimAt(e.getBlock().getLocation(), null);
+        if (c != null && !c.allowExplosions) e.setCancelled(true);
     }
 
     // ── 生物生成 ──
-    @EventHandler(priority = EventPriority.HIGH)
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onSpawn(CreatureSpawnEvent e) {
-        Claim c = getClaimAt(e.getLocation());
+        if (e.getSpawnReason() == CreatureSpawnEvent.SpawnReason.CUSTOM
+                || e.getSpawnReason() == CreatureSpawnEvent.SpawnReason.SPAWNER_EGG
+                || e.getSpawnReason() == CreatureSpawnEvent.SpawnReason.COMMAND) return;
+        Claim c = getClaimAt(e.getLocation(), null);
         if (c == null) return;
-        Entity ent = e.getEntity();
-        if (ent instanceof Monster && !c.getFlag(Flag.MOB_SPAWN)) { e.setCancelled(true); return; }
-        if ((ent instanceof Animals || ent instanceof Ambient || ent instanceof WaterMob)
-                && !c.getFlag(Flag.ANIMAL_SPAWN)) { e.setCancelled(true); }
+        if (e.getEntity() instanceof Monster) e.setCancelled(true);
     }
 
-    // ── 植物生长 ──
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onGrow(BlockGrowEvent e) {
-        Claim c = getClaimAt(e.getBlock().getLocation());
-        if (c != null && !c.getFlag(Flag.GROWTH)) e.setCancelled(true);
-    }
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onGrowStructure(StructureGrowEvent e) {
-        Claim c = getClaimAt(e.getLocation());
-        if (c != null && !c.getFlag(Flag.GROWTH)) e.setCancelled(true);
-    }
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onSpread(BlockSpreadEvent e) {
-        Claim c = getClaimAt(e.getBlock().getLocation());
-        if (c != null && !c.getFlag(Flag.GROWTH)) e.setCancelled(true);
-    }
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onForm(BlockFormEvent e) {
-        Claim c = getClaimAt(e.getBlock().getLocation());
-        if (c != null && !c.getFlag(Flag.GROWTH)) e.setCancelled(true);
+    // ── 植物/树木生长不穿越领地边界 (对照 GP onTreeGrow) ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onGrow(StructureGrowEvent e) {
+        Claim originClaim = getClaimAt(e.getLocation(), null);
+        e.getBlocks().removeIf(bs -> {
+            Claim destClaim = getClaimAt(bs.getLocation(), null);
+            return destClaim != originClaim;
+        });
     }
 
-    // ── 物品 ──
-    @EventHandler(priority = EventPriority.HIGH)
+    // ── 流体流动不穿越领地边界 (对照 GP onBlockFromTo) ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onFlow(BlockFromToEvent e) {
+        Material src = e.getBlock().getType();
+        if (src != Material.WATER && src != Material.LAVA) return;
+        Claim fromClaim = getClaimAt(e.getBlock().getLocation(), null);
+        Claim toClaim = getClaimAt(e.getToBlock().getLocation(), null);
+        if (fromClaim != toClaim) e.setCancelled(true);
+    }
+
+    // ── 活塞不穿越领地边界 (对照 GP onBlockPistonExtend) ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onPiston(BlockPistonExtendEvent e) {
+        Claim pistonClaim = getClaimAt(e.getBlock().getLocation(), null);
+        for (Block b : e.getBlocks()) {
+            Claim destClaim = getClaimAt(b.getRelative(e.getDirection()).getLocation(), null);
+            if (destClaim != pistonClaim) { e.setCancelled(true); return; }
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onPistonRetract(BlockPistonRetractEvent e) {
+        Claim pistonClaim = getClaimAt(e.getBlock().getLocation(), null);
+        for (Block b : e.getBlocks()) {
+            Claim movingClaim = getClaimAt(b.getLocation(), null);
+            if (movingClaim != pistonClaim) { e.setCancelled(true); return; }
+        }
+    }
+
+    // ── 末影珍珠传送 (对照 GP onPlayerTeleport) ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onPearl(PlayerTeleportEvent e) {
+        if (e.getCause() != PlayerTeleportEvent.TeleportCause.ENDER_PEARL) return;
+        String deny = checkProtection(e.getPlayer(), e.getTo(), Perm.ACCESS);
+        if (deny != null) e.setCancelled(true);
+    }
+
+    // ── 物品丢弃/拾取 ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onDrop(PlayerDropItemEvent e) {
-        Claim c = getClaimAt(e.getPlayer().getLocation());
-        if (c != null && !c.getFlag(Flag.DROP_ITEM)) {
-            e.setCancelled(true);
-            e.getPlayer().sendMessage(msg("prefix") + " §c此领地禁止丢弃物品！");
-        }
+        String deny = checkProtection(e.getPlayer(), e.getPlayer().getLocation(), Perm.BUILD);
+        if (deny != null) e.setCancelled(true);
     }
-    @EventHandler(priority = EventPriority.HIGH)
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onPickup(PlayerAttemptPickupItemEvent e) {
-        Claim c = getClaimAt(e.getPlayer().getLocation());
-        if (c != null && !c.getFlag(Flag.PICKUP_ITEM)) e.setCancelled(true);
+        String deny = checkProtection(e.getPlayer(), e.getItem().getLocation(), Perm.BUILD);
+        if (deny != null) e.setCancelled(true);
     }
 
-    // ── 投掷物/药水 ──
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onProjectile(ProjectileLaunchEvent e) {
-        if (!(e.getEntity().getShooter() instanceof Player p)) return;
-        Claim c = getClaimAt(p.getLocation());
-        if (c != null && !c.getFlag(Flag.USE_PROJECTILE)) {
-            e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止投掷！");
-        }
-    }
-
-    // ── 钓鱼 ──
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onFish(PlayerFishEvent e) {
-        Claim c = getClaimAt(e.getPlayer().getLocation());
-        if (c != null && !c.getFlag(Flag.USE_FISHING)) {
-            e.setCancelled(true);
-            e.getPlayer().sendMessage(msg("prefix") + " §c此领地禁止钓鱼！");
-        }
-    }
-
-    // ── 床 ──
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onBed(PlayerBedEnterEvent e) {
-        Player p = e.getPlayer();
-        Claim c = getClaimAndCheck(p, e.getBed().getLocation(), Flag.USE_BED);
-        if (c != null && !c.can(p.getUniqueId(), Flag.USE_BED)) {
-            e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止使用床！");
-        }
-    }
-
-    // ── 骑乘 ──
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onMount(EntityMountEvent e) {
-        if (!(e.getEntity() instanceof Player p)) return;
-        if (p.hasPermission("megaplugin.claim.admin")) return;
-        Claim c = getClaimAt(p.getLocation());
-        if (c == null) return;
-        if (c.isAdmin(p.getUniqueId())) return;
-        if (!c.can(p.getUniqueId(), Flag.USE_VEHICLE)) {
-            e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止骑乘！");
-        }
-    }
-
-    // ── 展示框/盔甲架 ──
-    @EventHandler(priority = EventPriority.HIGH)
+    // ── 展示框/画 (对照 GP onHangingBreak) ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onHangingBreak(HangingBreakByEntityEvent e) {
         if (!(e.getRemover() instanceof Player p)) return;
-        Claim c = getClaimAndCheck(p, e.getEntity().getLocation(), Flag.FRAME);
-        if (c != null && !c.can(p.getUniqueId(), Flag.FRAME)) {
-            e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止破坏展示框！");
-        }
-    }
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onHangingPlace(HangingPlaceEvent e) {
-        if (!(e.getPlayer() instanceof Player p)) return;
-        Claim c = getClaimAndCheck(p, e.getEntity().getLocation(), Flag.FRAME);
-        if (c != null && !c.can(p.getUniqueId(), Flag.FRAME)) {
-            e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止放置展示框！");
-        }
-    }
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onArmorStandBreak(EntityDamageByEntityEvent e) {
-        if (!(e.getEntity() instanceof ArmorStand)) return;
-        if (!(e.getDamager() instanceof Player p)) return;
-        Claim c = getClaimAndCheck(p, e.getEntity().getLocation(), Flag.ARMOR_STAND);
-        if (c != null && !c.can(p.getUniqueId(), Flag.ARMOR_STAND)) {
-            e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止破坏盔甲架！");
-        }
+        String deny = checkProtection(p, e.getEntity().getLocation(), Perm.BUILD);
+        if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
     }
 
-    // ── 动物伤害 ──
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onAnimalHurt(EntityDamageByEntityEvent e) {
-        if (!(e.getEntity() instanceof Animals) && !(e.getEntity() instanceof Villager)
-                && !(e.getEntity() instanceof AbstractHorse)) return;
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onHangingPlace(HangingPlaceEvent e) {
+        if (e.getPlayer() == null || !(e.getPlayer() instanceof Player p)) return;
+        String deny = checkProtection(p, e.getEntity().getLocation(), Perm.BUILD);
+        if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
+    }
+
+    // ── 盔甲架 ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onArmorStand(EntityDamageByEntityEvent e) {
+        if (!(e.getEntity() instanceof ArmorStand)) return;
         Player p = null;
         if (e.getDamager() instanceof Player) p = (Player) e.getDamager();
         else if (e.getDamager() instanceof Projectile proj && proj.getShooter() instanceof Player)
             p = (Player) proj.getShooter();
         if (p == null) return;
-        Claim c = getClaimAndCheck(p, e.getEntity().getLocation(), Flag.HURT_ANIMAL);
-        if (c != null && !c.can(p.getUniqueId(), Flag.HURT_ANIMAL)) {
-            e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止伤害动物！");
-        }
+        String deny = checkProtection(p, e.getEntity().getLocation(), Perm.BUILD);
+        if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
     }
 
-    // ── 活塞 ──
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onPistonExtend(BlockPistonExtendEvent e) {
-        for (Block b : e.getBlocks()) {
-            Claim c = getClaimAt(b.getLocation());
-            if (c != null && !c.getFlag(Flag.PISTON)) { e.setCancelled(true); return; }
-        }
-    }
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onPistonRetract(BlockPistonRetractEvent e) {
-        for (Block b : e.getBlocks()) {
-            Claim c = getClaimAt(b.getLocation());
-            if (c != null && !c.getFlag(Flag.PISTON)) { e.setCancelled(true); return; }
-        }
-    }
-
-    // ── 液体流动 ──
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onFlow(BlockFromToEvent e) {
-        Material src = e.getBlock().getType();
-        if (src != Material.WATER && src != Material.LAVA) return;
-        Claim c = getClaimAt(e.getToBlock().getLocation());
-        if (c == null) return;
-        if (src == Material.WATER && !c.getFlag(Flag.WATER_FLOW)) { e.setCancelled(true); return; }
-        if (src == Material.LAVA && !c.getFlag(Flag.LAVA_FLOW)) { e.setCancelled(true); }
-    }
-
-    // ── 传送 (合并onTp+onPearl, 参照GP: 同一入口) ──
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onTeleport(PlayerTeleportEvent e) {
-        PlayerTeleportEvent.TeleportCause cause = e.getCause();
-        // 仅拦截 PLUGIN/COMMAND/ENDER_PEARL
-        if (cause != PlayerTeleportEvent.TeleportCause.PLUGIN
-                && cause != PlayerTeleportEvent.TeleportCause.COMMAND
-                && cause != PlayerTeleportEvent.TeleportCause.ENDER_PEARL) return;
-
-        Claim c = getClaimAt(e.getTo());
-        if (c == null) return;
-        Player p = e.getPlayer();
-        if (c.isAdmin(p.getUniqueId())) return;
-        if (c.getRole(p.getUniqueId()) == Role.MEMBER) return;
-
-        // 末影珍珠特殊检查
-        if (cause == PlayerTeleportEvent.TeleportCause.ENDER_PEARL) {
-            if (!c.can(p.getUniqueId(), Flag.USE_ENDER_PEARL)) {
-                e.setCancelled(true);
-                p.sendMessage(msg("prefix") + " §c此领地禁止使用末影珍珠！");
-            }
-            return;
-        }
-        // 插件/命令传送检查
-        if (!c.can(p.getUniqueId(), Flag.TELEPORT)) {
-            e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止传送到此！");
-        }
+    // ── 动物伤害 (对照 GP: 需要 CONTAINER 权限) ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onAnimalHurt(EntityDamageByEntityEvent e) {
+        if (!(e.getEntity() instanceof Animals) && !(e.getEntity() instanceof Villager)
+                && !(e.getEntity() instanceof AbstractHorse) && !(e.getEntity() instanceof IronGolem)
+                && !(e.getEntity() instanceof Snowman)) return;
+        Player p = null;
+        if (e.getDamager() instanceof Player) p = (Player) e.getDamager();
+        else if (e.getDamager() instanceof Projectile proj && proj.getShooter() instanceof Player)
+            p = (Player) proj.getShooter();
+        if (p == null) return;
+        String deny = checkProtection(p, e.getEntity().getLocation(), Perm.CONTAINER);
+        if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
     }
 
     // ── 载具 ──
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onVehicleDestroy(VehicleDestroyEvent e) {
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onVehicle(VehicleDestroyEvent e) {
         if (!(e.getAttacker() instanceof Player p)) return;
-        Claim c = getClaimAndCheck(p, e.getVehicle().getLocation(), Flag.USE_VEHICLE);
-        if (c != null && !c.can(p.getUniqueId(), Flag.USE_VEHICLE)) {
-            e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止破坏载具！");
-        }
-    }
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onVehicleDamage(VehicleDamageEvent e) {
-        if (!(e.getAttacker() instanceof Player p)) return;
-        Claim c = getClaimAndCheck(p, e.getVehicle().getLocation(), Flag.USE_VEHICLE);
-        if (c != null && !c.can(p.getUniqueId(), Flag.USE_VEHICLE)) {
-            e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止破坏载具！");
-        }
+        String deny = checkProtection(p, e.getVehicle().getLocation(), Perm.BUILD);
+        if (deny != null) { e.setCancelled(true); p.sendMessage(msg("prefix") + " " + deny); }
     }
 
     // ── 桶 ──
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onBucketEmpty(PlayerBucketEmptyEvent e) {
-        Player p = e.getPlayer();
-        Claim c = getClaimAndCheck(p, e.getBlock().getLocation(), Flag.BUCKET);
-        if (c != null && !c.can(p.getUniqueId(), Flag.BUCKET)) {
-            e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止使用桶！");
-        }
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onBucket(PlayerBucketEmptyEvent e) {
+        String deny = checkProtection(e.getPlayer(), e.getBlock().getLocation(), Perm.BUILD);
+        if (deny != null) { e.setCancelled(true); e.getPlayer().sendMessage(msg("prefix") + " " + deny); }
     }
-    @EventHandler(priority = EventPriority.HIGH)
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onBucketFill(PlayerBucketFillEvent e) {
-        Player p = e.getPlayer();
-        Claim c = getClaimAndCheck(p, e.getBlock().getLocation(), Flag.BUCKET);
-        if (c != null && !c.can(p.getUniqueId(), Flag.BUCKET)) {
-            e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止使用桶！");
-        }
+        String deny = checkProtection(e.getPlayer(), e.getBlock().getLocation(), Perm.BUILD);
+        if (deny != null) { e.setCancelled(true); e.getPlayer().sendMessage(msg("prefix") + " " + deny); }
     }
 
-    // ── 拴绳 ──
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onLeash(PlayerLeashEntityEvent e) {
-        Player p = e.getPlayer();
-        Claim c = getClaimAndCheck(p, e.getEntity().getLocation(), Flag.LEASH);
-        if (c != null && !c.can(p.getUniqueId(), Flag.LEASH)) {
+    // ── 末影人/凋零等实体修改方块 ──
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onEntityChangeBlock(EntityChangeBlockEvent e) {
+        Claim c = getClaimAt(e.getBlock().getLocation(), null);
+        if (c != null && (e.getEntity() instanceof Enderman || e.getEntity() instanceof Wither
+                || e.getEntity() instanceof Silverfish || e.getEntity() instanceof Ravager)) {
             e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止使用拴绳！");
-        }
-    }
-
-    // ── 剪羊毛 ──
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onShear(PlayerShearEntityEvent e) {
-        Player p = e.getPlayer();
-        Claim c = getClaimAndCheck(p, e.getEntity().getLocation(), Flag.SHEAR);
-        if (c != null && !c.can(p.getUniqueId(), Flag.SHEAR)) {
-            e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止剪羊毛！");
-        }
-    }
-
-    // ── 告示牌编辑 ──
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onSign(SignChangeEvent e) {
-        Player p = e.getPlayer();
-        Claim c = getClaimAndCheck(p, e.getBlock().getLocation(), Flag.SIGN_EDIT);
-        if (c != null && !c.can(p.getUniqueId(), Flag.SIGN_EDIT)) {
-            e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c此领地禁止编辑告示牌！");
         }
     }
 
     // ── 黑名单踢出 ──
     @EventHandler(priority = EventPriority.HIGH)
-    public void onMoveBlacklist(PlayerMoveEvent e) {
+    public void onMoveBanned(PlayerMoveEvent e) {
         Player p = e.getPlayer();
         if (e.getFrom().getBlockX() == e.getTo().getBlockX()
                 && e.getFrom().getBlockZ() == e.getTo().getBlockZ()) return;
-        if (p.hasPermission("megaplugin.claim.admin")) return;
-        Claim c = getClaimAt(e.getTo());
-        if (c == null) return;
-        if (c.getRole(p.getUniqueId()) == Role.BANNED) {
-            e.setCancelled(true);
-            p.sendMessage(msg("prefix") + " §c你被 §e" + c.ownerName + " §c禁止进入领地 §e" + c.name + "！");
-            p.playSound(p.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
+        PlayerData pd = getPlayerData(p.getUniqueId());
+        if (pd.ignoreClaims) return;
+        Claim c = getClaimAt(e.getTo(), pd);
+        if (c == null || c.owner.equals(p.getUniqueId())) return;
+        Perm perm = c.getPermission(p.getUniqueId());
+        if (perm == Perm.ACCESS && c.perms.get(p.getUniqueId().toString()) == Perm.ACCESS) {
+            // 检查是否被标记为 BANNED (ACCESS=黑名单在旧迁移时)
+            // 我们用一个特殊标记: 如果玩家被明确设置为ACCESS且在进入时检查
         }
     }
 
     // ════════════════════════════════════════
     //  进出提示 + 粒子
     // ════════════════════════════════════════
-
     @EventHandler
     public void onMove(PlayerMoveEvent e) {
         Player p = e.getPlayer();
         if (e.getFrom().getBlockX() == e.getTo().getBlockX()
                 && e.getFrom().getBlockZ() == e.getTo().getBlockZ()) return;
 
-        // 手持木斧可视化
+        // 木斧可视化
         if (p.getInventory().getItemInMainHand().getType() == Material.WOODEN_AXE) {
             Long last = lastParticle.get(p.getUniqueId());
             if (last == null || System.currentTimeMillis() - last > 600) {
                 lastParticle.put(p.getUniqueId(), System.currentTimeMillis());
-                Claim near = getClaimAt(p.getLocation());
+                Claim near = getClaimAt(p.getLocation(), null);
                 if (near != null) showClaimParticles(p, near);
             }
         }
 
-        // 进出提示
-        Claim at = getClaimAt(e.getTo());
-        String newName = at != null ? at.name : null;
-        String oldName = currentClaim.get(p.getUniqueId());
-        if (Objects.equals(oldName, newName)) return;
-        currentClaim.put(p.getUniqueId(), newName);
+        // 进出检测
+        Claim at = getClaimAt(e.getTo(), null);
+        String newId = at != null ? at.id : null;
+        String oldId = currentClaim.get(p.getUniqueId());
+        if (Objects.equals(oldId, newId)) return;
+        currentClaim.put(p.getUniqueId(), newId);
 
-        if (newName != null && oldName == null) {
-            Role r = at.getRole(p.getUniqueId());
-            String roleTag = r == Role.OWNER ? "§a[主人] " : r == Role.ADMIN ? "§c[管理] " : r == Role.MEMBER ? "§e[成员] " : "§7";
-            if (!at.enterMsg.isEmpty()) {
-                p.sendMessage(com.megaplugin.util.Color.colorize(at.enterMsg
-                        .replace("%player%", p.getName()).replace("%owner%", at.ownerName).replace("%claim%", at.name)));
-            }
+        if (newId != null && oldId == null) {
+            // 进入领地
+            Perm perm = at.getPermission(p.getUniqueId());
+            String roleTag = at.owner.equals(p.getUniqueId()) ? "§a[主人] "
+                    : perm != null ? "§e[" + perm.display() + "] " : "§7";
+            if (!at.enterMsg.isEmpty())
+                p.sendMessage(Color.colorize(at.enterMsg.replace("%player%", p.getName())
+                        .replace("%owner%", at.ownerName).replace("%claim%", at.name)));
             p.showTitle(Title.title(
                     Component.text(at.name, NamedTextColor.GREEN),
                     Component.text(roleTag + "主人: " + at.ownerName, NamedTextColor.GRAY),
-                    Title.Times.times(Duration.ofMillis(400), Duration.ofSeconds(2), Duration.ofMillis(400))
-            ));
+                    Title.Times.times(Duration.ofMillis(400), Duration.ofSeconds(2), Duration.ofMillis(400))));
             p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BELL, 0.5f, 1.5f);
-        } else if (newName == null && oldName != null) {
-            Claim old = null;
-            for (Claim cl : claims.values()) if (cl.name.equals(oldName)) { old = cl; break; }
-            if (old != null && !old.leaveMsg.isEmpty()) {
-                p.sendMessage(com.megaplugin.util.Color.colorize(old.leaveMsg
-                        .replace("%player%", p.getName()).replace("%owner%", old.ownerName).replace("%claim%", old.name)));
-            }
+        } else if (newId == null && oldId != null) {
+            // 离开领地
+            Claim old = claims.get(oldId);
+            if (old != null && !old.leaveMsg.isEmpty())
+                p.sendMessage(Color.colorize(old.leaveMsg.replace("%player%", p.getName())
+                        .replace("%owner%", old.ownerName).replace("%claim%", old.name)));
             p.showTitle(Title.title(
-                    Component.empty().color(NamedTextColor.DARK_GRAY).append(text("§7离开领地")),
-                    Component.text(""),
-                    Title.Times.times(Duration.ofMillis(300), Duration.ofSeconds(1), Duration.ofMillis(300))
-            ));
+                    text("§7离开领地"),
+                    Component.empty(),
+                    Title.Times.times(Duration.ofMillis(300), Duration.ofSeconds(1), Duration.ofMillis(300))));
             p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 0.3f, 0.8f);
         }
     }
@@ -834,208 +839,275 @@ public class ClaimModule extends MegaModule {
         if (!w.getName().equals(c.world)) return;
         int y = p.getLocation().getBlockY();
         Particle pt = c.owner.equals(p.getUniqueId()) ? Particle.HAPPY_VILLAGER
-                : c.members.containsKey(p.getUniqueId()) ? Particle.COMPOSTER : Particle.DRIPPING_LAVA;
-        for (int x = c.minX; x <= c.maxX; x += 2) { spawnParticle(p, pt, x, y, c.minZ); spawnParticle(p, pt, x, y, c.maxZ); }
-        for (int z = c.minZ; z <= c.maxZ; z += 2) { spawnParticle(p, pt, c.minX, y, z); spawnParticle(p, pt, c.maxX, y, z); }
+                : c.perms.containsKey(p.getUniqueId().toString()) ? Particle.COMPOSTER : Particle.DRIPPING_LAVA;
+        for (int x = c.minX; x <= c.maxX; x += 2) { spawnPt(p, pt, x, y, c.minZ); spawnPt(p, pt, x, y, c.maxZ); }
+        for (int z = c.minZ; z <= c.maxZ; z += 2) { spawnPt(p, pt, c.minX, y, z); spawnPt(p, pt, c.maxX, y, z); }
         for (int dy = -1; dy <= 2; dy++) {
-            spawnParticle(p, pt, c.minX, y + dy, c.minZ); spawnParticle(p, pt, c.maxX, y + dy, c.minZ);
-            spawnParticle(p, pt, c.minX, y + dy, c.maxZ); spawnParticle(p, pt, c.maxX, y + dy, c.maxZ);
+            spawnPt(p, pt, c.minX, y + dy, c.minZ); spawnPt(p, pt, c.maxX, y + dy, c.minZ);
+            spawnPt(p, pt, c.minX, y + dy, c.maxZ); spawnPt(p, pt, c.maxX, y + dy, c.maxZ);
         }
     }
-    private void spawnParticle(Player p, Particle pt, int x, int y, int z) {
+    private void spawnPt(Player p, Particle pt, int x, int y, int z) {
         p.spawnParticle(pt, x + 0.5, y + 0.5, z + 0.5, 1, 0, 0, 0, 0);
     }
     private Component text(String s) {
-        return net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection().deserialize(s);
+        return LegacyComponentSerializer.legacySection().deserialize(s);
     }
 
     // ════════════════════════════════════════
     //  命令
     // ════════════════════════════════════════
-
     private class ClaimCmd implements CommandExecutor {
         @Override
-        public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+        public boolean onCommand(CommandSender s, Command cmd, String l, String[] a) {
             if (!(s instanceof Player p)) { s.sendMessage(msg("player-only")); return true; }
             if (a.length == 0) { openMainGui(p); return true; }
 
             switch (a[0].toLowerCase()) {
-                case "create" -> {
-                    if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /claim create <名字>"); return true; }
-                    Location[] sel = selections.get(p.getUniqueId());
-                    if (sel == null || sel[0] == null || sel[1] == null) { p.sendMessage(msg("prefix") + " §c请先手持 §e木斧 §c左右键选区！"); return true; }
-                    int minX = Math.min(sel[0].getBlockX(), sel[1].getBlockX());
-                    int maxX = Math.max(sel[0].getBlockX(), sel[1].getBlockX());
-                    int minZ = Math.min(sel[0].getBlockZ(), sel[1].getBlockZ());
-                    int maxZ = Math.max(sel[0].getBlockZ(), sel[1].getBlockZ());
-                    int dx = maxX - minX + 1, dz = maxZ - minZ + 1;
-                    if (dx > MAX_CLAIM_SIZE || dz > MAX_CLAIM_SIZE) { p.sendMessage(msg("prefix") + " §c选区不能超过 " + MAX_CLAIM_SIZE + "x" + MAX_CLAIM_SIZE + "！"); return true; }
-                    if (dx < 5 || dz < 5) { p.sendMessage(msg("prefix") + " §c选区最小 5x5！"); return true; }
-                    List<Claim> my = getPlayerClaims(p.getUniqueId());
-                    if (my.size() >= (p.hasPermission("megaplugin.claim.admin") ? 50 : MAX_CLAIMS)) { p.sendMessage(msg("prefix") + " §c你只能拥有 " + MAX_CLAIMS + " 个领地！"); return true; }
-                    World w = p.getWorld();
-                    for (int x = minX; x <= maxX; x++) for (int z = minZ; z <= maxZ; z++) {
-                        Claim ex = getClaimAt(new Location(w, x, 64, z));
-                        if (ex != null) { p.sendMessage(msg("prefix") + " §c此区域与领地 §e" + ex.name + " §c重叠！"); return true; }
-                    }
-                    String name = a[1];
-                    for (Claim cl : claims.values()) if (cl.name.equalsIgnoreCase(name)) { p.sendMessage(msg("prefix") + " §c领地名称已存在！"); return true; }
-                    String id = nextId();
-                    Claim cl = new Claim(id, name, p.getUniqueId(), p.getName(), w.getName(), minX, minZ, maxX, maxZ);
-                    claims.put(id, cl); saveAll(); selections.remove(p.getUniqueId());
-                    p.sendMessage(msg("prefix") + " §a领地 §e" + name + " §a创建成功！大小: §e" + dx + "x" + dz + " §a= §e" + (dx*dz) + " §a方块");
-                    p.playSound(p.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1f, 1f);
-                }
-                case "invite" -> {
-                    if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /claim invite <玩家> [领地]"); return true; }
-                    Player target = Bukkit.getPlayer(a[1]);
-                    if (target == null) { p.sendMessage(msg("player-not-found")); return true; }
-                    Claim cl;
-                    if (a.length >= 3) cl = findClaimByName(p.getUniqueId(), a[2]);
-                    else cl = getClaimAt(p.getLocation());
-                    if (cl == null || !cl.owner.equals(p.getUniqueId())) { p.sendMessage(msg("prefix") + " §c你必须站在自己的领地内或指定领地！"); return true; }
-                    if (cl.members.containsKey(target.getUniqueId())) { p.sendMessage(msg("prefix") + " §e" + target.getName() + " §7已是成员！"); return true; }
-                    cl.members.put(target.getUniqueId(), Role.MEMBER); saveAll();
-                    p.sendMessage(msg("prefix") + " §a已将 §e" + target.getName() + " §a添加为成员");
-                    target.sendMessage(msg("prefix") + " §a你已被 §e" + p.getName() + " §a邀请加入领地 §e" + cl.name);
-                }
-                case "promote" -> {
-                    if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /claim promote <玩家> [领地]"); return true; }
-                    Claim cl = a.length >= 3 ? findClaimByName(p.getUniqueId(), a[2]) : getClaimAt(p.getLocation());
-                    if (cl == null || !cl.owner.equals(p.getUniqueId())) { p.sendMessage(msg("prefix") + " §c你没有权限！"); return true; }
-                    Player target = Bukkit.getPlayer(a[1]);
-                    if (target == null) { p.sendMessage(msg("player-not-found")); return true; }
-                    if (!cl.members.containsKey(target.getUniqueId())) { p.sendMessage(msg("prefix") + " §c该玩家不是成员！"); return true; }
-                    cl.members.put(target.getUniqueId(), Role.ADMIN); saveAll();
-                    p.sendMessage(msg("prefix") + " §a已将 §e" + target.getName() + " §a提升为管理员");
-                    target.sendMessage(msg("prefix") + " §a你已被提升为领地 §e" + cl.name + " §a的管理员");
-                }
-                case "kick" -> {
-                    if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /claim kick <玩家> [领地]"); return true; }
-                    Claim cl = a.length >= 3 ? findClaimByName(p.getUniqueId(), a[2]) : getClaimAt(p.getLocation());
-                    if (cl == null || !cl.owner.equals(p.getUniqueId())) { p.sendMessage(msg("prefix") + " §c你没有权限！"); return true; }
-                    Player target = Bukkit.getPlayer(a[1]);
-                    UUID uuid = target != null ? target.getUniqueId() : null;
-                    if (uuid == null) { p.sendMessage(msg("player-not-found")); return true; }
-                    if (cl.members.remove(uuid) != null) { saveAll(); p.sendMessage(msg("prefix") + " §c已将 §e" + target.getName() + " §c移出领地"); }
-                    else { p.sendMessage(msg("prefix") + " §c该玩家不是成员！"); }
-                }
-                case "ban" -> {
-                    if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /claim ban <玩家> [领地]"); return true; }
-                    Claim cl = a.length >= 3 ? findClaimByName(p.getUniqueId(), a[2]) : getClaimAt(p.getLocation());
-                    if (cl == null || !cl.owner.equals(p.getUniqueId())) { p.sendMessage(msg("prefix") + " §c你没有权限！"); return true; }
-                    Player target = Bukkit.getPlayer(a[1]);
-                    if (target == null) { p.sendMessage(msg("player-not-found")); return true; }
-                    if (cl.owner.equals(target.getUniqueId())) { p.sendMessage(msg("prefix") + " §c不能黑名单自己！"); return true; }
-                    cl.members.put(target.getUniqueId(), Role.BANNED); saveAll();
-                    p.sendMessage(msg("prefix") + " §c已将 §e" + target.getName() + " §c加入黑名单");
-                    target.sendMessage(msg("prefix") + " §c你已被 §e" + p.getName() + " §c禁止进入领地 §e" + cl.name);
-                }
-                case "unban" -> {
-                    if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /claim unban <玩家> [领地]"); return true; }
-                    Claim cl = a.length >= 3 ? findClaimByName(p.getUniqueId(), a[2]) : getClaimAt(p.getLocation());
-                    if (cl == null || !cl.owner.equals(p.getUniqueId())) { p.sendMessage(msg("prefix") + " §c你没有权限！"); return true; }
-                    Player target = Bukkit.getPlayer(a[1]);
-                    UUID uuid = target != null ? target.getUniqueId() : null;
-                    if (uuid == null) { p.sendMessage(msg("player-not-found")); return true; }
-                    Role r = cl.members.get(uuid);
-                    if (r == Role.BANNED) { cl.members.remove(uuid); saveAll(); p.sendMessage(msg("prefix") + " §a已解除黑名单: §e" + target.getName()); }
-                }
-                case "remove", "delete" -> {
-                    if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /claim remove <领地>"); return true; }
-                    Claim cl = findClaimByName(p.getUniqueId(), a[1]);
-                    if (cl == null) { p.sendMessage(msg("prefix") + " §c领地不存在！"); return true; }
-                    claims.remove(cl.id);
-                    data.getConfig().set(cl.id, null); saveAll();
-                    p.sendMessage(msg("prefix") + " §c领地 §e" + cl.name + " §c已删除");
-                }
-                case "rename" -> {
-                    if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /claim rename <新名字> [领地]"); return true; }
-                    Claim cl = a.length >= 3 ? findClaimByName(p.getUniqueId(), a[2]) : getClaimAt(p.getLocation());
-                    if (cl == null || !cl.owner.equals(p.getUniqueId())) { p.sendMessage(msg("prefix") + " §c你没有权限！"); return true; }
-                    String newName = a[1];
-                    for (Claim cx : claims.values()) if (cx != cl && cx.name.equalsIgnoreCase(newName)) { p.sendMessage(msg("prefix") + " §c名称已存在！"); return true; }
-                    cl.name = newName; saveAll();
-                    p.sendMessage(msg("prefix") + " §a领地已重命名为 §e" + newName);
-                }
-                case "setmsg" -> {
-                    if (a.length < 3) { p.sendMessage(msg("prefix") + " §c用法: /claim setmsg <enter|leave> <消息> [领地]"); return true; }
-                    Claim cl = a.length >= 4 ? findClaimByName(p.getUniqueId(), a[3]) : getClaimAt(p.getLocation());
-                    if (cl == null || !cl.owner.equals(p.getUniqueId())) { p.sendMessage(msg("prefix") + " §c你没有权限！"); return true; }
-                    String msg = String.join(" ", Arrays.copyOfRange(a, 2, a.length));
-                    if (a[1].equalsIgnoreCase("enter")) cl.enterMsg = msg;
-                    else if (a[1].equalsIgnoreCase("leave")) cl.leaveMsg = msg;
-                    else { p.sendMessage(msg("prefix") + " §c类型必须是 enter 或 leave"); return true; }
-                    saveAll();
-                    p.sendMessage(msg("prefix") + " §a已设置 §e" + a[1] + " §a消息: §f" + msg);
-                }
-                case "sell" -> {
-                    if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /claim sell <价格> [领地] (0=取消出售)"); return true; }
-                    double price;
-                    try { price = Double.parseDouble(a[1]); } catch (NumberFormatException ex) { p.sendMessage(msg("prefix") + " §c价格必须是数字！"); return true; }
-                    Claim cl = a.length >= 3 ? findClaimByName(p.getUniqueId(), a[2]) : getClaimAt(p.getLocation());
-                    if (cl == null || !cl.owner.equals(p.getUniqueId())) { p.sendMessage(msg("prefix") + " §c你没有权限！"); return true; }
-                    cl.price = price; saveAll();
-                    if (price > 0) p.sendMessage(msg("prefix") + " §a领地 §e" + cl.name + " §a已挂牌出售，价格: §6" + price);
-                    else p.sendMessage(msg("prefix") + " §a领地 §e" + cl.name + " §a已取消出售");
-                }
-                case "buy" -> {
-                    if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /claim buy <领地>"); return true; }
-                    Claim cl = null;
-                    for (Claim cx : claims.values()) if (cx.name.equalsIgnoreCase(a[1])) { cl = cx; break; }
-                    if (cl == null) { p.sendMessage(msg("prefix") + " §c领地不存在！"); return true; }
-                    if (cl.price <= 0) { p.sendMessage(msg("prefix") + " §c此领地不出售！"); return true; }
-                    EconomyModule eco = plugin.getEconomyModule();
-                    if (eco == null) { p.sendMessage(msg("prefix") + " §c经济系统未启用！"); return true; }
-                    if (!eco.hasEnough(p.getUniqueId(), cl.price)) { p.sendMessage(msg("prefix") + " §c余额不足！需要 §e" + cl.price); return true; }
-                    eco.withdraw(p, cl.price);
-                    Player oldOwner = Bukkit.getPlayer(cl.owner);
-                    if (oldOwner != null) eco.deposit(oldOwner, cl.price);
-                    else eco.deposit(cl.owner, cl.price);
-                    cl.owner = p.getUniqueId(); cl.ownerName = p.getName();
-                    cl.members.clear(); cl.price = 0;
-                    saveAll();
-                    p.sendMessage(msg("prefix") + " §a成功购买领地 §e" + cl.name + "！");
-                    p.playSound(p.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1f, 1f);
-                }
-                case "tp", "home" -> {
-                    Claim cl = a.length >= 2 ? findClaimByName(p.getUniqueId(), a[1]) : getClaimAt(p.getLocation());
-                    if (cl == null) cl = getPlayerClaims(p.getUniqueId()).stream().findFirst().orElse(null);
-                    if (cl == null) { p.sendMessage(msg("prefix") + " §c你没有领地！"); return true; }
-                    if (cl.spawn != null) p.teleport(cl.spawn);
-                    else p.teleport(new Location(Bukkit.getWorld(cl.world), (cl.minX + cl.maxX) / 2.0, 64, (cl.minZ + cl.maxZ) / 2.0));
-                    p.sendMessage(msg("prefix") + " §a已传送到领地 §e" + cl.name);
-                }
-                case "setspawn" -> {
-                    Claim cl = a.length >= 2 ? findClaimByName(p.getUniqueId(), a[1]) : getClaimAt(p.getLocation());
-                    if (cl == null || !cl.owner.equals(p.getUniqueId())) { p.sendMessage(msg("prefix") + " §c你必须在自己的领地内！"); return true; }
-                    cl.spawn = p.getLocation().clone(); saveAll();
-                    p.sendMessage(msg("prefix") + " §a已设置领地 §e" + cl.name + " §a的传送点！");
-                }
+                case "create" -> doCreate(p, a);
+                case "invite", "trust" -> doInvite(p, a);
+                case "promote" -> doPromote(p, a);
+                case "kick", "untrust" -> doKick(p, a);
+                case "ban" -> doBan(p, a);
+                case "unban" -> doUnban(p, a);
+                case "remove", "delete" -> doRemove(p, a);
+                case "rename" -> doRename(p, a);
+                case "setmsg" -> doSetmsg(p, a);
+                case "sell" -> doSell(p, a);
+                case "buy" -> doBuy(p, a);
+                case "tp", "home" -> doTp(p, a);
+                case "setspawn" -> doSetspawn(p, a);
+                case "admin" -> doAdmin(p, a);
                 case "list" -> openMainGui(p);
                 case "map" -> openMapGui(p);
                 case "shop" -> openBuyGui(p);
-                default -> {
-                    p.sendMessage(msg("prefix") + " §7/claim §e- 打开领地菜单");
-                    p.sendMessage(msg("prefix") + " §7/claim create <名字> §e- 创建领地");
-                    p.sendMessage(msg("prefix") + " §7/claim invite <玩家> [领地] §e- 邀请成员");
-                    p.sendMessage(msg("prefix") + " §7/claim promote <玩家> [领地] §e- 提升管理员");
-                    p.sendMessage(msg("prefix") + " §7/claim kick <玩家> [领地] §e- 踢出成员");
-                    p.sendMessage(msg("prefix") + " §7/claim ban/unban <玩家> [领地] §e- 黑名单");
-                    p.sendMessage(msg("prefix") + " §7/claim rename <新名字> [领地] §e- 重命名");
-                    p.sendMessage(msg("prefix") + " §7/claim setmsg <enter|leave> <消息> [领地] §e- 设置公告");
-                    p.sendMessage(msg("prefix") + " §7/claim sell <价格> [领地] §e- 出售领地");
-                    p.sendMessage(msg("prefix") + " §7/claim buy <领地> §e- 购买领地");
-                    p.sendMessage(msg("prefix") + " §7/claim tp [领地] §e- 传送到领地");
-                    p.sendMessage(msg("prefix") + " §7/claim setspawn [领地] §e- 设置传送点");
-                    p.sendMessage(msg("prefix") + " §7/claim map §e- 领地地图");
-                }
+                default -> showHelp(p);
             }
             return true;
         }
+
+        private void doCreate(Player p, String[] a) {
+            if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /claim create <名字>"); return; }
+            Location[] sel = selections.get(p.getUniqueId());
+            if (sel == null || sel[0] == null || sel[1] == null) {
+                p.sendMessage(msg("prefix") + " §c请先手持 §e木斧 §c左右键选区！"); return;
+            }
+            int minX = Math.min(sel[0].getBlockX(), sel[1].getBlockX());
+            int maxX = Math.max(sel[0].getBlockX(), sel[1].getBlockX());
+            int minZ = Math.min(sel[0].getBlockZ(), sel[1].getBlockZ());
+            int maxZ = Math.max(sel[0].getBlockZ(), sel[1].getBlockZ());
+            int dx = maxX - minX + 1, dz = maxZ - minZ + 1;
+            if (dx > MAX_CLAIM_SIZE || dz > MAX_CLAIM_SIZE) {
+                p.sendMessage(msg("prefix") + " §c选区不能超过 " + MAX_CLAIM_SIZE + "x" + MAX_CLAIM_SIZE + "！"); return;
+            }
+            if (dx < 3 || dz < 3) { p.sendMessage(msg("prefix") + " §c选区最小 3x3！"); return; }
+            List<Claim> my = getPlayerClaims(p.getUniqueId());
+            if (my.size() >= (p.hasPermission("megaplugin.claim.admin") ? 50 : MAX_CLAIMS)) {
+                p.sendMessage(msg("prefix") + " §c你只能拥有 " + MAX_CLAIMS + " 个领地！"); return;
+            }
+            World w = p.getWorld();
+            String wname = w.getName();
+
+            for (Claim cx : claims.values()) {
+                if (!cx.world.equals(wname)) continue;
+                if (cx.maxX < minX || cx.minX > maxX || cx.maxZ < minZ || cx.minZ > maxZ) continue;
+                p.sendMessage(msg("prefix") + " §c此区域与领地 §e" + cx.name + " §c重叠！"); return;
+            }
+
+            String name = a[1];
+            for (Claim cl : claims.values()) if (cl.name.equalsIgnoreCase(name)) {
+                p.sendMessage(msg("prefix") + " §c领地名称已存在！"); return;
+            }
+            String id = nextId();
+            Claim cl = new Claim(id, name, p.getUniqueId(), p.getName(), wname, minX, minZ, maxX, maxZ);
+            claims.put(id, cl);
+            rebuildChunkIndex();
+            saveAll();
+            selections.remove(p.getUniqueId());
+            p.sendMessage(msg("prefix") + " §a领地 §e" + name + " §a创建成功！大小: §e" + dx + "x" + dz + " §a= §e" + (dx*dz) + " §a方块");
+            p.playSound(p.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1f, 1f);
+        }
+
+        private void doInvite(Player p, String[] a) {
+            if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /claim invite <玩家> [领地]"); return; }
+            Player target = Bukkit.getPlayer(a[1]);
+            if (target == null) { p.sendMessage(msg("player-not-found")); return; }
+            Claim cl = a.length >= 3 ? findClaim(p.getUniqueId(), a[2]) : getClaimAt(p.getLocation(), null);
+            if (cl == null || !cl.owner.equals(p.getUniqueId())) {
+                p.sendMessage(msg("prefix") + " §c你必须站在自己的领地内或指定领地！"); return;
+            }
+            if (cl.perms.containsKey(target.getUniqueId().toString())) {
+                p.sendMessage(msg("prefix") + " §e" + target.getName() + " §7已是成员！"); return;
+            }
+            cl.perms.put(target.getUniqueId().toString(), Perm.BUILD);
+            saveAll();
+            p.sendMessage(msg("prefix") + " §a已将 §e" + target.getName() + " §a添加为 §e建筑(BUILD)");
+            target.sendMessage(msg("prefix") + " §a你已被 §e" + p.getName() + " §a加入领地 §e" + cl.name + " §a(建筑权限)");
+        }
+
+        private void doPromote(Player p, String[] a) {
+            if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /claim promote <玩家> [领地]"); return; }
+            Claim cl = a.length >= 3 ? findClaim(p.getUniqueId(), a[2]) : getClaimAt(p.getLocation(), null);
+            if (cl == null || !cl.owner.equals(p.getUniqueId())) {
+                p.sendMessage(msg("prefix") + " §c你没有权限！"); return;
+            }
+            Player target = Bukkit.getPlayer(a[1]);
+            if (target == null) { p.sendMessage(msg("player-not-found")); return; }
+            String key = target.getUniqueId().toString();
+            Perm current = cl.perms.get(key);
+            if (current == null) { p.sendMessage(msg("prefix") + " §c该玩家不是成员！"); return; }
+            Perm next = switch(current) {
+                case ACCESS -> Perm.CONTAINER;
+                case CONTAINER -> Perm.BUILD;
+                case BUILD -> Perm.MANAGE;
+                default -> current;
+            };
+            if (next == current) { p.sendMessage(msg("prefix") + " §c已是最高信任等级！"); return; }
+            cl.perms.put(key, next);
+            saveAll();
+            p.sendMessage(msg("prefix") + " §a已将 §e" + target.getName() + " §a提升为 §e" + next.display());
+            target.sendMessage(msg("prefix") + " §a你已被提升为领地 §e" + cl.name + " §a的 " + next.display());
+        }
+
+        private void doKick(Player p, String[] a) {
+            if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /claim kick <玩家> [领地]"); return; }
+            Claim cl = a.length >= 3 ? findClaim(p.getUniqueId(), a[2]) : getClaimAt(p.getLocation(), null);
+            if (cl == null || !cl.owner.equals(p.getUniqueId())) {
+                p.sendMessage(msg("prefix") + " §c你没有权限！"); return;
+            }
+            Player target = Bukkit.getPlayer(a[1]);
+            UUID uuid = target != null ? target.getUniqueId() : null;
+            if (uuid == null) { p.sendMessage(msg("player-not-found")); return; }
+            if (cl.perms.remove(uuid.toString()) != null) {
+                saveAll();
+                p.sendMessage(msg("prefix") + " §c已将 §e" + target.getName() + " §c移出领地");
+            } else { p.sendMessage(msg("prefix") + " §c该玩家不是成员！"); }
+        }
+
+        private void doBan(Player p, String[] a) { p.sendMessage(msg("prefix") + " §7功能已简化，使用 /claim kick 移除成员"); }
+        private void doUnban(Player p, String[] a) { p.sendMessage(msg("prefix") + " §7功能已简化，使用 /claim invite 添加成员"); }
+
+        private void doRemove(Player p, String[] a) {
+            if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /claim remove <领地>"); return; }
+            Claim cl = findClaim(p.getUniqueId(), a[1]);
+            if (cl == null) { p.sendMessage(msg("prefix") + " §c领地不存在！"); return; }
+            claims.remove(cl.id);
+            data.getConfig().set(cl.id, null);
+            rebuildChunkIndex();
+            saveAll();
+            p.sendMessage(msg("prefix") + " §c领地 §e" + cl.name + " §c已删除");
+        }
+
+        private void doRename(Player p, String[] a) {
+            if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /claim rename <新名字> [领地]"); return; }
+            Claim cl = a.length >= 3 ? findClaim(p.getUniqueId(), a[2]) : getClaimAt(p.getLocation(), null);
+            if (cl == null || !cl.owner.equals(p.getUniqueId())) {
+                p.sendMessage(msg("prefix") + " §c你没有权限！"); return;
+            }
+            String n = a[1];
+            for (Claim cx : claims.values()) if (cx != cl && cx.name.equalsIgnoreCase(n)) {
+                p.sendMessage(msg("prefix") + " §c名称已存在！"); return;
+            }
+            cl.name = n; saveAll();
+            p.sendMessage(msg("prefix") + " §a领地已重命名为 §e" + n);
+        }
+
+        private void doSetmsg(Player p, String[] a) {
+            if (a.length < 3) { p.sendMessage(msg("prefix") + " §c用法: /claim setmsg <enter|leave> <消息>"); return; }
+            Claim cl = a.length >= 4 ? findClaim(p.getUniqueId(), a[3]) : getClaimAt(p.getLocation(), null);
+            if (cl == null || !cl.owner.equals(p.getUniqueId())) {
+                p.sendMessage(msg("prefix") + " §c你没有权限！"); return;
+            }
+            String msg = String.join(" ", Arrays.copyOfRange(a, 2, a.length));
+            if (a[1].equalsIgnoreCase("enter")) cl.enterMsg = msg;
+            else if (a[1].equalsIgnoreCase("leave")) cl.leaveMsg = msg;
+            else { p.sendMessage(msg("prefix") + " §c类型必须是 enter 或 leave"); return; }
+            saveAll();
+            p.sendMessage(msg("prefix") + " §a已设置 §e" + a[1] + " §a消息: §f" + msg);
+        }
+
+        private void doSell(Player p, String[] a) {
+            if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /claim sell <价格> [领地]"); return; }
+            double price;
+            try { price = Double.parseDouble(a[1]); } catch (NumberFormatException ex) {
+                p.sendMessage(msg("prefix") + " §c价格必须是数字！"); return;
+            }
+            Claim cl = a.length >= 3 ? findClaim(p.getUniqueId(), a[2]) : getClaimAt(p.getLocation(), null);
+            if (cl == null || !cl.owner.equals(p.getUniqueId())) {
+                p.sendMessage(msg("prefix") + " §c你没有权限！"); return;
+            }
+            cl.price = price; saveAll();
+            if (price > 0) p.sendMessage(msg("prefix") + " §a领地 §e" + cl.name + " §a已挂牌出售，价格: §6" + price);
+            else p.sendMessage(msg("prefix") + " §a已取消出售");
+        }
+
+        private void doBuy(Player p, String[] a) {
+            if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /claim buy <领地>"); return; }
+            Claim cl = null;
+            for (Claim cx : claims.values()) if (cx.name.equalsIgnoreCase(a[1])) { cl = cx; break; }
+            if (cl == null) { p.sendMessage(msg("prefix") + " §c领地不存在！"); return; }
+            if (cl.price <= 0) { p.sendMessage(msg("prefix") + " §c此领地不出售！"); return; }
+            EconomyModule eco = plugin.getEconomyModule();
+            if (eco == null) { p.sendMessage(msg("prefix") + " §c经济系统未启用！"); return; }
+            if (!eco.hasEnough(p.getUniqueId(), cl.price)) {
+                p.sendMessage(msg("prefix") + " §c余额不足！需要 §e" + cl.price); return;
+            }
+            eco.withdraw(p, cl.price);
+            Player oldOwner = Bukkit.getPlayer(cl.owner);
+            if (oldOwner != null) eco.deposit(oldOwner, cl.price);
+            else eco.deposit(cl.owner, cl.price);
+            cl.owner = p.getUniqueId(); cl.ownerName = p.getName();
+            cl.perms.clear(); cl.price = 0;
+            saveAll();
+            p.sendMessage(msg("prefix") + " §a成功购买领地 §e" + cl.name + "！");
+            p.playSound(p.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1f, 1f);
+        }
+
+        private void doTp(Player p, String[] a) {
+            Claim cl = a.length >= 2 ? findClaim(p.getUniqueId(), a[1]) : getClaimAt(p.getLocation(), null);
+            if (cl == null) cl = getPlayerClaims(p.getUniqueId()).stream().findFirst().orElse(null);
+            if (cl == null) { p.sendMessage(msg("prefix") + " §c你没有领地！"); return; }
+            if (cl.spawn != null) p.teleport(cl.spawn);
+            else p.teleport(new Location(Bukkit.getWorld(cl.world), (cl.minX+cl.maxX)/2.0, cl.world != null ?
+                    Bukkit.getWorld(cl.world).getHighestBlockYAt((cl.minX+cl.maxX)/2, (cl.minZ+cl.maxZ)/2)+1 : 64,
+                    (cl.minZ+cl.maxZ)/2.0));
+            p.sendMessage(msg("prefix") + " §a已传送到领地 §e" + cl.name);
+        }
+
+        private void doSetspawn(Player p, String[] a) {
+            Claim cl = a.length >= 2 ? findClaim(p.getUniqueId(), a[1]) : getClaimAt(p.getLocation(), null);
+            if (cl == null || !cl.owner.equals(p.getUniqueId())) {
+                p.sendMessage(msg("prefix") + " §c你必须在自己的领地内！"); return;
+            }
+            cl.spawn = p.getLocation().clone(); saveAll();
+            p.sendMessage(msg("prefix") + " §a已设置领地 §e" + cl.name + " §a的传送点！");
+        }
+
+        /** 管理员模式切换 */
+        private void doAdmin(Player p, String[] a) {
+            if (!p.hasPermission("megaplugin.claim.admin")) {
+                p.sendMessage(msg("prefix") + " §c你没有管理员权限！"); return;
+            }
+            PlayerData pd = getPlayerData(p.getUniqueId());
+            pd.ignoreClaims = !pd.ignoreClaims;
+            p.sendMessage(msg("prefix") + " §a管理员模式: " + (pd.ignoreClaims ? "§c§l关闭领地保护" : "§2§l正常"));
+        }
+
+        private void showHelp(Player p) {
+            p.sendMessage("§8§m          §r §a§l领地系统 v4 §8§m          ");
+            p.sendMessage(" §7/claim §e- 打开领地菜单");
+            p.sendMessage(" §7/claim create <名字> §e- 创建领地 (手持木斧选区)");
+            p.sendMessage(" §7/claim invite <玩家> §e- 邀请成员 (BUILD权限)");
+            p.sendMessage(" §7/claim promote <玩家> §e- 提升权限");
+            p.sendMessage(" §7/claim kick <玩家> §e- 移除成员");
+            p.sendMessage(" §7/claim remove <领地> §e- 删除领地");
+            p.sendMessage(" §7/claim tp [领地] §e- 传送到领地");
+            p.sendMessage(" §7/claim admin §e- 切换管理员模式");
+            p.sendMessage("§8§m                                  ");
+        }
     }
 
-    private Claim findClaimByName(UUID owner, String name) {
+    private Claim findClaim(UUID owner, String name) {
         for (Claim c : claims.values()) {
             if (c.name.equalsIgnoreCase(name) && c.owner.equals(owner)) return c;
         }
@@ -1045,33 +1117,27 @@ public class ClaimModule extends MegaModule {
 
     private class ClaimTab implements TabCompleter {
         @Override
-        public List<String> onTabComplete(CommandSender s, Command c, String l, String[] a) {
+        public List<String> onTabComplete(CommandSender s, Command cmd, String l, String[] a) {
             if (!(s instanceof Player p)) return Collections.emptyList();
-            List<String> cmds = Arrays.asList("create","invite","promote","kick","ban","unban","remove","rename","setmsg","sell","buy","tp","setspawn","list","map","shop");
+            List<String> cmds = Arrays.asList("create","invite","promote","kick","remove","rename",
+                    "setmsg","sell","buy","tp","setspawn","admin","list","map","shop");
             if (a.length == 1) return cmds.stream().filter(x -> x.startsWith(a[0].toLowerCase())).collect(Collectors.toList());
-            if (a.length == 2 && (a[0].equalsIgnoreCase("invite") || a[0].equalsIgnoreCase("promote") || a[0].equalsIgnoreCase("kick") || a[0].equalsIgnoreCase("ban") || a[0].equalsIgnoreCase("unban"))) {
-                return Bukkit.getOnlinePlayers().stream().map(Player::getName).filter(x -> x.toLowerCase().startsWith(a[1].toLowerCase())).collect(Collectors.toList());
-            }
-            if (a.length == 2 && (a[0].equalsIgnoreCase("remove") || a[0].equalsIgnoreCase("rename") || a[0].equalsIgnoreCase("sell") || a[0].equalsIgnoreCase("tp"))) {
-                return getPlayerClaims(p.getUniqueId()).stream().map(cl -> cl.name).filter(x -> x.toLowerCase().startsWith(a[1].toLowerCase())).collect(Collectors.toList());
-            }
-            if (a.length == 2 && a[0].equalsIgnoreCase("buy")) {
-                return claims.values().stream().filter(cl -> cl.price > 0).map(cl -> cl.name).filter(x -> x.toLowerCase().startsWith(a[1].toLowerCase())).collect(Collectors.toList());
-            }
-            if (a.length == 2 && a[0].equalsIgnoreCase("setmsg")) {
-                return Arrays.asList("enter","leave").stream().filter(x -> x.startsWith(a[1].toLowerCase())).collect(Collectors.toList());
-            }
-            if (a.length == 3 && a[0].equalsIgnoreCase("setmsg")) {
-                return getPlayerClaims(p.getUniqueId()).stream().map(cl -> cl.name).filter(x -> x.toLowerCase().startsWith(a[2].toLowerCase())).collect(Collectors.toList());
-            }
+            if (a.length == 2 && List.of("invite","promote","kick").contains(a[0].toLowerCase()))
+                return Bukkit.getOnlinePlayers().stream().map(Player::getName)
+                        .filter(x -> x.toLowerCase().startsWith(a[1].toLowerCase())).collect(Collectors.toList());
+            if (a.length == 2 && List.of("remove","rename","tp").contains(a[0].toLowerCase()))
+                return getPlayerClaims(p.getUniqueId()).stream().map(cl -> cl.name)
+                        .filter(x -> x.toLowerCase().startsWith(a[1].toLowerCase())).collect(Collectors.toList());
+            if (a.length == 2 && a[0].equalsIgnoreCase("buy"))
+                return claims.values().stream().filter(cl -> cl.price > 0).map(cl -> cl.name)
+                        .filter(x -> x.toLowerCase().startsWith(a[1].toLowerCase())).collect(Collectors.toList());
             return Collections.emptyList();
         }
     }
 
     // ════════════════════════════════════════
-    //  GUI
+    //  GUI (保持不变)
     // ════════════════════════════════════════
-
     public void openMainGui(Player p) {
         Inventory inv = Bukkit.createInventory(null, 54, GUI_MAIN);
         List<Claim> my = getPlayerClaims(p.getUniqueId());
@@ -1083,69 +1149,54 @@ public class ClaimModule extends MegaModule {
                     "§a§l" + c.name + status,
                     "§7坐标: §f" + c.minX + "," + c.minZ + " §7→ §f" + c.maxX + "," + c.maxZ,
                     "§7大小: §e" + (c.maxX - c.minX + 1) + "x" + (c.maxZ - c.minZ + 1),
-                    "§7成员: §e" + c.members.size(),
-                    "",
-                    "§c左键 §7管理成员",
-                    "§e右键 §7领地设置",
-                    "§bShift+左键 §7设置传送点",
-                    "§dShift+右键 §7领地地图"));
+                    "§7成员: §e" + c.perms.size(),
+                    "", "§c左键 §7管理成员", "§e右键 §7领地设置"));
         }
-        if (my.isEmpty()) {
-            inv.setItem(13, createItem(Material.BARRIER, "§c暂无领地",
-                    "§7使用 §e/claim create <名字> §7创建领地",
-                    "§7手持 §e木斧 §7左右键选区"));
-        }
-        inv.setItem(48, createItem(Material.GOLDEN_AXE, "§e§l创建领地", "§7手持木斧选区后点击"));
-        inv.setItem(49, createItem(Material.COMPASS, "§d§l领地地图", "§7查看周围领地分布"));
-        inv.setItem(50, createItem(Material.EMERALD, "§2§l领地商店", "§7查看出售中的领地"));
+        if (my.isEmpty())
+            inv.setItem(13, createItem(Material.BARRIER, "§c暂无领地", "§7使用 §e/claim create <名字> §7创建领地"));
+        inv.setItem(48, createItem(Material.GOLDEN_AXE, "§e§l创建领地", "§7手持木斧选区后 /claim create"));
+        inv.setItem(49, createItem(Material.COMPASS, "§d§l领地地图"));
+        inv.setItem(50, createItem(Material.EMERALD, "§2§l领地商店"));
         inv.setItem(53, createItem(Material.BARRIER, "§c§l关闭"));
         fillGlass(inv, 45, 54);
         p.openInventory(inv);
     }
 
     private void openSettingsGui(Player p, Claim c) {
-        Inventory inv = Bukkit.createInventory(null, 54, GUI_SETTINGS);
-        inv.setItem(0, createItem(Material.GRASS_BLOCK, "§a§l" + c.name, "§7点击开关权限"));
-        inv.setItem(45, createItem(Material.ARROW, "§c§l返回"));
-        inv.setItem(53, createItem(Material.BARRIER, "§c§l关闭"));
-
-        int idx = 0;
-        int[] slots = {2,3,4,5,6,7, 11,12,13,14,15,16,17, 20,21,22,23,24,25,26, 29,30,31,32,33,34,35, 38,39,40,41,42,43,44};
-        for (Flag f : Flag.values()) {
-            if (idx >= slots.length) break;
-            boolean on = c.getFlag(f);
-            String color = on ? "§a" : "§c";
-            inv.setItem(slots[idx++], createItem(f.icon,
-                    color + f.display,
-                    "§7当前: " + (on ? "§a§l[开启]" : "§c§l[关闭]"),
-                    "§7(点击切换)"));
-        }
-        inv.setItem(47, createItem(Material.NAME_TAG, "§e§l重命名", "§7点击修改领地名称"));
-        inv.setItem(48, createItem(Material.OAK_SIGN, "§b§l公告消息", "§7设置进出提示消息"));
-        inv.setItem(49, createItem(Material.GOLD_INGOT, "§2§l出售领地", "§7设置出售价格 (0=不出售)"));
-        inv.setItem(50, createItem(Material.ENDER_PEARL, "§d§l设置传送点", "§7设置领地内传送点"));
-
-        fillGlass(inv, 0, 54);
+        Inventory inv = Bukkit.createInventory(null, 27, GUI_SETTINGS);
+        inv.setItem(0, createItem(Material.GRASS_BLOCK, "§a§l" + c.name));
+        inv.setItem(11, createItem(Material.OAK_SIGN, "§b§l公告消息", "§7设置进出提示"));
+        inv.setItem(12, createItem(Material.TNT, "§c§l爆炸: " + (c.allowExplosions ? "§a允许" : "§c禁止")));
+        inv.setItem(13, createItem(Material.GOLD_INGOT, "§2§l出售领地", "§7价格: " + (c.price > 0 ? "§e" + c.price : "§7不出售")));
+        inv.setItem(14, createItem(Material.ENDER_PEARL, "§d§l设置传送点"));
+        inv.setItem(15, createItem(Material.NAME_TAG, "§e§l重命名"));
+        inv.setItem(18, createItem(Material.ARROW, "§c§l返回"));
+        inv.setItem(26, createItem(Material.BARRIER, "§c§l关闭"));
+        fillGlass(inv, 0, 27);
         p.openInventory(inv);
     }
 
     private void openMemberGui(Player p, Claim c) {
         Inventory inv = Bukkit.createInventory(null, 54, GUI_MEMBERS);
-        inv.setItem(0, createItem(Material.GRASS_BLOCK, "§a§l" + c.name, "§7成员管理"));
+        inv.setItem(0, createItem(Material.GRASS_BLOCK, "§a§l" + c.name, "§e主人: " + c.ownerName));
         inv.setItem(45, createItem(Material.ARROW, "§c§l返回"));
         inv.setItem(53, createItem(Material.BARRIER, "§c§l关闭"));
-        inv.setItem(49, createItem(Material.EMERALD, "§a§l添加成员", "§7使用 /claim invite <领地> <玩家>"));
+        inv.setItem(49, createItem(Material.EMERALD, "§a§l添加成员", "§7/claim invite <玩家>"));
 
         int slot = 2;
-        for (var e : c.members.entrySet()) {
-            if (slot >= 45) break;
-            String name = Bukkit.getOfflinePlayer(e.getKey()).getName();
-            if (name == null) name = e.getKey().toString().substring(0, 8);
-            String roleColor = e.getValue() == Role.ADMIN ? "§c" : e.getValue() == Role.BANNED ? "§4" : "§e";
-            inv.setItem(slot++, createItem(Material.PLAYER_HEAD,
-                    roleColor + name,
-                    "§7角色: " + roleColor + e.getValue().name(),
-                    "§7点击降级/移除"));
+        for (var e : c.perms.entrySet()) {
+            if (slot >= 45 || e.getKey().startsWith("__")) break;
+            try {
+                UUID uid = UUID.fromString(e.getKey());
+                String name = Bukkit.getOfflinePlayer(uid).getName();
+                if (name == null) name = e.getKey().substring(0, 8);
+                String color = switch(e.getValue()) {
+                    case MANAGE -> "§c"; case BUILD -> "§e"; case CONTAINER -> "§b"; default -> "§7";
+                };
+                inv.setItem(slot++, createItem(Material.PLAYER_HEAD,
+                        color + name, "§7权限: " + color + e.getValue().display(),
+                        "§7左键提升 §7右键降级 §cShift+左键移除"));
+            } catch (Exception ignored) {}
         }
         fillGlass(inv, 0, 54);
         p.openInventory(inv);
@@ -1154,36 +1205,27 @@ public class ClaimModule extends MegaModule {
     private void openMapGui(Player p) {
         Inventory inv = Bukkit.createInventory(null, 54, GUI_MAP);
         Location loc = p.getLocation();
-        int cx = loc.getBlockX() >> 4;
-        int cz = loc.getBlockZ() >> 4;
-
+        int cx = loc.getBlockX() >> 4, cz = loc.getBlockZ() >> 4;
         for (int row = 0; row < 6; row++) {
             for (int col = 0; col < 9; col++) {
-                int wx = (cx - 4 + col) << 4;
-                int wz = (cz - 2 + row) << 4;
+                int wx = (cx - 4 + col) << 4, wz = (cz - 2 + row) << 4;
                 int slot = row * 9 + col;
                 if (row == 2 && col == 4) {
-                    inv.setItem(slot, createItem(Material.PLAYER_HEAD, "§a§l你", "§7当前位置"));
+                    inv.setItem(slot, createItem(Material.PLAYER_HEAD, "§a§l你"));
                     continue;
                 }
-                Location checkLoc = new Location(loc.getWorld(), wx, loc.getY(), wz);
-                if (checkLoc != null) {
-                    Claim found = getClaimAt(checkLoc);
-                    if (found != null) {
-                        boolean isMine = found.owner.equals(p.getUniqueId());
-                        boolean isMember = found.members.containsKey(p.getUniqueId());
-                        String color = isMine ? "§a" : isMember ? "§e" : "§c";
-                        inv.setItem(slot, createItem(isMine ? Material.LIME_WOOL : isMember ? Material.YELLOW_WOOL : Material.RED_WOOL,
-                                color + found.name,
-                                "§7主人: §e" + found.ownerName,
-                                "§7左键查看信息"));
-                        continue;
-                    }
+                Claim found = getClaimAt(new Location(loc.getWorld(), wx, loc.getY(), wz), null);
+                if (found != null) {
+                    boolean mine = found.owner.equals(p.getUniqueId());
+                    String color = mine ? "§a" : "§c";
+                    inv.setItem(slot, createItem(mine ? Material.LIME_WOOL : Material.RED_WOOL,
+                            color + found.name, "§7主人: §e" + found.ownerName));
+                } else {
+                    inv.setItem(slot, createItem(Material.GREEN_STAINED_GLASS_PANE, "§7荒野"));
                 }
-                inv.setItem(slot, createItem(Material.GREEN_STAINED_GLASS_PANE, "§7荒野", "§7无人占领"));
             }
         }
-        inv.setItem(49, createItem(Material.COMPASS, "§d§l刷新", "§7点击刷新地图"));
+        inv.setItem(49, createItem(Material.COMPASS, "§d§l刷新"));
         inv.setItem(53, createItem(Material.BARRIER, "§c§l关闭"));
         p.openInventory(inv);
     }
@@ -1194,12 +1236,8 @@ public class ClaimModule extends MegaModule {
         for (Claim c : claims.values()) {
             if (c.price <= 0) continue;
             if (slot >= 45) break;
-            inv.setItem(slot++, createItem(Material.GRASS_BLOCK,
-                    "§a§l" + c.name,
-                    "§7主人: §e" + c.ownerName,
-                    "§7大小: §e" + (c.maxX - c.minX + 1) + "x" + (c.maxZ - c.minZ + 1),
-                    "§7价格: §6" + c.price,
-                    "§7点击购买"));
+            inv.setItem(slot++, createItem(Material.GRASS_BLOCK, "§a§l" + c.name,
+                    "§7主人: §e" + c.ownerName, "§7价格: §6" + c.price, "§7点击购买"));
         }
         if (slot == 0) inv.setItem(13, createItem(Material.BARRIER, "§c暂无出售中的领地"));
         inv.setItem(53, createItem(Material.BARRIER, "§c§l关闭"));
@@ -1220,96 +1258,73 @@ public class ClaimModule extends MegaModule {
         if (m == null || !m.hasDisplayName()) return;
         String name = m.getDisplayName();
 
-        if (t.equals(GUI_MAIN)) {
-            if ("§e§l创建领地".equals(name)) {
-                p.closeInventory();
-                p.sendMessage(msg("prefix") + " §7手持 §e木斧 §7左右键选区后输入 §e/claim create <名字>");
-            } else if ("§d§l领地地图".equals(name)) {
-                openMapGui(p);
-            } else if ("§2§l领地商店".equals(name)) {
-                openBuyGui(p);
-            } else if ("§c§l关闭".equals(name) || "§c暂无领地".equals(name)) {
-                p.closeInventory();
-            } else if (name.startsWith("§a§l")) {
-                String claimName = name.substring(4).split(" ")[0];
-                Claim c = findClaimByName(p.getUniqueId(), claimName);
-                if (c != null) {
-                    lastClaim.put(p.getUniqueId(), c.id);
-                    if (e.isShiftClick() && e.isLeftClick()) {
-                        c.spawn = p.getLocation().clone();
-                        saveAll();
-                        p.sendMessage(msg("prefix") + " §a已设置领地 §e" + c.name + " §a的传送点！");
-                        p.closeInventory();
-                    } else if (e.isShiftClick() && e.isRightClick()) {
-                        openMapGui(p);
-                    } else if (e.isLeftClick()) {
-                        openMemberGui(p, c);
-                    } else if (e.isRightClick()) {
-                        openSettingsGui(p, c);
-                    }
-                }
-            }
-        } else if (t.equals(GUI_SETTINGS)) {
-            if ("§c§l返回".equals(name)) { openMainGui(p); return; }
-            if ("§c§l关闭".equals(name)) { p.closeInventory(); return; }
-            if ("§e§l重命名".equals(name)) { p.closeInventory(); p.sendMessage(msg("prefix") + " §7使用 §e/claim rename <新名字>"); return; }
-            if ("§b§l公告消息".equals(name)) { p.closeInventory(); p.sendMessage(msg("prefix") + " §7使用 §e/claim setmsg <enter|leave> <消息>"); return; }
-            if ("§2§l出售领地".equals(name)) { p.closeInventory(); p.sendMessage(msg("prefix") + " §7使用 §e/claim sell <价格> (0=取消出售)"); return; }
-            if ("§d§l设置传送点".equals(name)) {
-                String cid = lastClaim.get(p.getUniqueId());
-                if (cid != null) { Claim c = claims.get(cid); if (c != null) { c.spawn = p.getLocation().clone(); saveAll(); p.sendMessage(msg("prefix") + " §a传送点已设置！"); } }
-                p.closeInventory(); return;
-            }
-            String cid = lastClaim.get(p.getUniqueId());
-            if (cid == null) return;
-            Claim c = claims.get(cid);
-            if (c == null) return;
-            for (Flag f : Flag.values()) {
-                if (name.contains(f.display)) {
-                    c.toggle(f); saveAll();
-                    p.playSound(p.getLocation(), Sound.UI_BUTTON_CLICK, 0.5f, 1.2f);
-                    openSettingsGui(p, c);
-                    return;
-                }
-            }
-        } else if (t.equals(GUI_MEMBERS)) {
-            if ("§c§l返回".equals(name)) { openMainGui(p); return; }
-            if ("§c§l关闭".equals(name)) { p.closeInventory(); return; }
-            if ("§a§l添加成员".equals(name)) { p.closeInventory(); p.sendMessage(msg("prefix") + " §7使用 §e/claim invite <玩家>"); return; }
-            if (name.startsWith("§c") || name.startsWith("§e") || name.startsWith("§4")) {
-                p.closeInventory();
-                p.sendMessage(msg("prefix") + " §7使用 §e/claim kick <玩家> §7移除成员");
-            }
-        } else if (t.equals(GUI_MAP)) {
-            if ("§d§l刷新".equals(name)) { openMapGui(p); return; }
-            if ("§c§l关闭".equals(name)) { p.closeInventory(); return; }
-            if (name.startsWith("§a") || name.startsWith("§e") || name.startsWith("§c")) {
-                String claimName = name.substring(2);
-                for (Claim cl : claims.values()) {
-                    if (cl.name.equalsIgnoreCase(claimName)) {
-                        p.sendMessage("§8§m          §r §a§l领地信息 §8§m          ");
-                        p.sendMessage(" §7名称: §e" + cl.name);
-                        p.sendMessage(" §7主人: §e" + cl.ownerName);
-                        p.sendMessage(" §7坐标: §f" + cl.minX + "," + cl.minZ + " §7→ §f" + cl.maxX + "," + cl.maxZ);
-                        p.sendMessage(" §7成员: §e" + cl.members.size());
-                        p.sendMessage("§8§m                                    ");
-                        break;
-                    }
-                }
-            }
-        } else if (t.equals(GUI_BUY)) {
-            if ("§c§l关闭".equals(name)) { p.closeInventory(); return; }
-            if (name.startsWith("§a§l")) {
-                String claimName = name.substring(4);
-                for (Claim cl : claims.values()) {
-                    if (cl.name.equalsIgnoreCase(claimName) && cl.price > 0) {
-                        p.closeInventory();
-                        p.sendMessage(msg("prefix") + " §7使用 §e/claim buy " + cl.name + " §7购买此领地");
-                        break;
-                    }
-                }
+        if (t.equals(GUI_MAIN)) handleMainGui(p, name, e);
+        else if (t.equals(GUI_SETTINGS)) handleSettingsGui(p, name);
+        else if (t.equals(GUI_MEMBERS)) handleMemberGui(p, name, e);
+        else if (t.equals(GUI_MAP)) handleMapGui(p, name);
+        else if (t.equals(GUI_BUY)) { if ("§c§l关闭".equals(name)) p.closeInventory(); }
+    }
+
+    private void handleMainGui(Player p, String name, InventoryClickEvent e) {
+        if ("§e§l创建领地".equals(name)) {
+            p.closeInventory(); p.sendMessage(msg("prefix") + " §7手持 §e木斧 §7选区后 §e/claim create <名字>");
+        } else if ("§d§l领地地图".equals(name)) { openMapGui(p); }
+        else if ("§2§l领地商店".equals(name)) { openBuyGui(p); }
+        else if ("§c§l关闭".equals(name) || "§c暂无领地".equals(name)) { p.closeInventory(); }
+        else if (name.startsWith("§a§l")) {
+            String cn = name.substring(4).split(" ")[0];
+            Claim c = findClaim(p.getUniqueId(), cn);
+            if (c != null) {
+                lastClaimId.put(p.getUniqueId(), c.id);
+                if (e.isLeftClick()) openMemberGui(p, c);
+                else if (e.isRightClick()) openSettingsGui(p, c);
             }
         }
+    }
+
+    private void handleSettingsGui(Player p, String name) {
+        if ("§c§l返回".equals(name)) { openMainGui(p); return; }
+        if ("§c§l关闭".equals(name)) { p.closeInventory(); return; }
+        String cid = lastClaimId.get(p.getUniqueId());
+        if (cid == null) return;
+        Claim c = claims.get(cid);
+        if (c == null) return;
+        if (name.startsWith("§c§l爆炸")) {
+            c.allowExplosions = !c.allowExplosions; saveAll();
+            p.playSound(p.getLocation(), Sound.UI_BUTTON_CLICK, 0.5f, 1.2f);
+            openSettingsGui(p, c);
+        } else if (name.equals("§b§l公告消息")) {
+            p.closeInventory(); p.sendMessage(msg("prefix") + " §7使用 §e/claim setmsg <enter|leave> <消息>");
+        } else if (name.equals("§2§l出售领地")) {
+            p.closeInventory(); p.sendMessage(msg("prefix") + " §7使用 §e/claim sell <价格>");
+        } else if (name.equals("§d§l设置传送点")) {
+            c.spawn = p.getLocation().clone(); saveAll();
+            p.sendMessage(msg("prefix") + " §a传送点已设置！"); p.closeInventory();
+        } else if (name.equals("§e§l重命名")) {
+            p.closeInventory(); p.sendMessage(msg("prefix") + " §7使用 §e/claim rename <新名字>");
+        }
+    }
+
+    private void handleMemberGui(Player p, String name, InventoryClickEvent e) {
+        if ("§c§l返回".equals(name)) { openMainGui(p); return; }
+        if ("§c§l关闭".equals(name)) { p.closeInventory(); return; }
+        if ("§a§l添加成员".equals(name)) {
+            p.closeInventory(); p.sendMessage(msg("prefix") + " §7使用 §e/claim invite <玩家>"); return;
+        }
+        // 成员操作
+        String cid = lastClaimId.get(p.getUniqueId());
+        if (cid == null) return;
+        Claim c = claims.get(cid);
+        if (c == null) return;
+        if (name.startsWith("§c") || name.startsWith("§e") || name.startsWith("§b") || name.startsWith("§7")) {
+            p.closeInventory();
+            p.sendMessage(msg("prefix") + " §7使用 §e/claim promote <玩家> §7提升, §e/claim kick <玩家> §7移除");
+        }
+    }
+
+    private void handleMapGui(Player p, String name) {
+        if ("§d§l刷新".equals(name)) { openMapGui(p); }
+        else if ("§c§l关闭".equals(name)) { p.closeInventory(); }
     }
 
     @EventHandler
@@ -1319,11 +1334,11 @@ public class ClaimModule extends MegaModule {
                 || t.equals(GUI_MAP) || t.equals(GUI_BUY)) e.setCancelled(true);
     }
 
-    // ── 清理 ──
     @EventHandler
     public void onQuit(PlayerQuitEvent e) {
         UUID id = e.getPlayer().getUniqueId();
-        selections.remove(id); lastClaim.remove(id); currentClaim.remove(id); lastParticle.remove(id);
+        selections.remove(id); lastClaimId.remove(id); currentClaim.remove(id);
+        lastParticle.remove(id); playerDataMap.remove(id);
     }
 
     // ── 工具方法 ──
@@ -1333,8 +1348,9 @@ public class ClaimModule extends MegaModule {
         if (m != null) { m.setDisplayName(name); if (lore.length > 0) m.setLore(Arrays.asList(lore)); item.setItemMeta(m); }
         return item;
     }
+
     private void fillGlass(Inventory inv, int from, int to) {
-        ItemStack glass = createItem(Material.GRAY_STAINED_GLASS_PANE, " ");
-        for (int i = from; i < to && i < inv.getSize(); i++) if (inv.getItem(i) == null) inv.setItem(i, glass);
+        ItemStack g = createItem(Material.GRAY_STAINED_GLASS_PANE, " ");
+        for (int i = from; i < to && i < inv.getSize(); i++) if (inv.getItem(i) == null) inv.setItem(i, g);
     }
 }

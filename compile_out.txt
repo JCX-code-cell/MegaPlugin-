@@ -1,0 +1,19 @@
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:3: 错误: 找不到符号
+import com.megaplugin.MegaPlugin;
+                     ^
+  符号:   类 MegaPlugin
+  位置: 程序包 com.megaplugin
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:4: 错误: 程序包com.megaplugin.util不存在
+import com.megaplugin.util.Color;
+                          ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:5: 错误: 程序包com.megaplugin.util不存在
+import com.megaplugin.util.DataFile;
+                          ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:6: 错误: 程序包net.kyori.adventure.text不存在
+import net.kyori.adventure.text.Component;
+                               ^
+c:\purpur\plugins\MegaPlugin\src\main\java\com\megaplugin\module\ClaimModule.java:7: 错误: 程序包net.kyori.adventure.text.format不存在
+import net.kyori.adventure.text.format.NamedTextColor;
+                                      ^
+5 个错误
+仅显示前 5 个错误（共 489 个）；若要查看更多错误，请使用 -Xmaxerrs
