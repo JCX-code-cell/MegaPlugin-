@@ -226,6 +226,10 @@ commands:
     description: Random teleport
     usage: /rtp
     aliases: [randomtp, wild]
+  grimbridge:
+    description: GrimAC bridge management
+    usage: /grimbridge <status|reload|alerts|verbose|info>
+    aliases: [gb]
 
 
 
