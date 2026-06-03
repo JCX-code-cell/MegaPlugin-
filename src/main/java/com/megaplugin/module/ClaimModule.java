@@ -26,6 +26,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.projectiles.ProjectileSource;
 
 import java.time.Duration;
+import java.io.File;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -63,6 +64,20 @@ public class ClaimModule extends MegaModule {
         Flag(String name, Material icon) { this.name = name; this.icon = icon; }
         public static Set<Flag> defaultVisitor() { return EnumSet.of(MOVE, TELEPORT, DOOR, CONTAINER); }
         public static Set<Flag> defaultMember() { return EnumSet.allOf(Flag.class); }
+        /** 旧版 v2 权限字符串 → Flag 集合 (数据迁移用) */
+        public static Set<Flag> fromOldPerm(String perm) {
+            if (perm == null) return defaultVisitor();
+            return switch (perm.toUpperCase()) {
+                case "ACCESS" -> defaultVisitor();
+                case "BUILD" -> EnumSet.of(PLACE, BREAK);
+                case "CONTAINER" -> EnumSet.of(CONTAINER);
+                case "FULL" -> defaultMember();
+                default -> {
+                    try { yield EnumSet.of(Flag.valueOf(perm)); }
+                    catch (IllegalArgumentException e) { yield defaultVisitor(); }
+                }
+            };
+        }
     }
 
     public enum OtherFlag {
@@ -115,10 +130,10 @@ public class ClaimModule extends MegaModule {
     private final Map<String, Claim> claims = new LinkedHashMap<>();
     private final Map<Long, List<Claim>> chunkIndex = new ConcurrentHashMap<>();
     private final Map<UUID, PlayerData> playerData = new ConcurrentHashMap<>();
-    private final Map<UUID, Location[]> selections = new HashMap<>();
-    private final Map<UUID, String> lastClaimId = new HashMap<>(), currentClaim = new HashMap<>();
-    private final Map<UUID, UUID> editingMember = new HashMap<>();
-    private final Map<UUID, Long> lastParticle = new HashMap<>();
+    private final Map<UUID, Location[]> selections = new ConcurrentHashMap<>();
+    private final Map<UUID, String> lastClaimId = new ConcurrentHashMap<>(), currentClaim = new ConcurrentHashMap<>();
+    private final Map<UUID, UUID> editingMember = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastParticle = new ConcurrentHashMap<>();
     private final Map<UUID, ClaimInvite> invites = new ConcurrentHashMap<>();
     private final Map<UUID, TpTask> tpTasks = new ConcurrentHashMap<>();
     private final Map<UUID, Long> tpCooldowns = new ConcurrentHashMap<>();
@@ -233,7 +248,13 @@ public class ClaimModule extends MegaModule {
                 }
             } catch (Exception ignored) {}
         }
-        if (migrated) { plugin.getLogger().info("[Claim] 已迁移旧数据到 v3"); saveAll(); }
+        if (migrated) {
+            plugin.getLogger().info("[Claim] 已迁移旧数据到 v3");
+            saveAll();
+            // 重命名旧文件, 避免每次启动重复迁移
+            if (old.getFile().exists()) old.getFile().renameTo(new File(old.getFile().getParent(), "claims_v2.yml.migrated"));
+            if (veryOld.getFile().exists()) veryOld.getFile().renameTo(new File(veryOld.getFile().getParent(), "claims.yml.migrated"));
+        }
     }
 
     private void saveAll() {
@@ -323,7 +344,7 @@ public class ClaimModule extends MegaModule {
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true) public void onCauldronChange(CauldronLevelChangeEvent e) { if (e.getEntity() instanceof Player p) { String deny = checkFlag(p, e.getBlock().getLocation(), Flag.FURNACE); if (deny != null) e.setCancelled(true); } }
 
     // ═══════ 进出提示 ═══════
-    @EventHandler public void onMove(PlayerMoveEvent e) { Player p = e.getPlayer(); if (e.getFrom().getBlockX() == e.getTo().getBlockX() && e.getFrom().getBlockZ() == e.getTo().getBlockZ()) return; TpTask tp = tpTasks.get(p.getUniqueId()); if (tp != null) { if (Math.abs(e.getTo().getBlockX() - tp.dest.getBlockX()) > 1 || Math.abs(e.getTo().getBlockZ() - tp.dest.getBlockZ()) > 1 || Math.abs(e.getTo().getBlockY() - tp.dest.getBlockY()) > 1) { Bukkit.getScheduler().cancelTask(tp.taskId); tpTasks.remove(p.getUniqueId()); p.sendMessage(msg("prefix") + " §c传送已取消！"); } } if (p.getInventory().getItemInMainHand().getType() == Material.WOODEN_AXE) { Long last = lastParticle.get(p.getUniqueId()); if (last == null || System.currentTimeMillis() - last > 600) { lastParticle.put(p.getUniqueId(), System.currentTimeMillis()); Claim near = getClaimAt(p.getLocation(), null); if (near != null) showClaimParticles(p, near); } } PlayerData d = pd(p.getUniqueId()); if (!d.ignoreClaims) { Claim tc = getClaimAt(e.getTo(), d); if (tc != null && !tc.checkFlag(p.getUniqueId(), Flag.MOVE)) { e.setCancelled(true); return; } if (tc != null && !tc.checkFlag(p.getUniqueId(), Flag.FLY) && (p.isFlying() || p.isGliding())) { p.setFlying(false); p.setGliding(false); p.sendMessage(msg("prefix") + " §c此领地禁止飞行！"); } } Claim at = getClaimAt(e.getTo(), null); String newId = at != null ? at.id : null, oldId = currentClaim.get(p.getUniqueId()); if (Objects.equals(oldId, newId)) return; currentClaim.put(p.getUniqueId(), newId); if (newId != null && oldId == null) { Set<Flag> mf = at.memberFlags.get(p.getUniqueId()); String tag = at.owner.equals(p.getUniqueId()) ? "§a[主人] " : (mf != null ? "§e[成员] " : "§7"); if (!at.enterMsg.isEmpty()) p.sendMessage(Color.colorize(at.enterMsg.replace("%player%", p.getName()).replace("%owner%", at.ownerName).replace("%claim%", at.name))); p.showTitle(Title.title(comp(at.name, NamedTextColor.GREEN), comp(tag + "主人: " + at.ownerName, NamedTextColor.GRAY), Title.Times.times(Duration.ofMillis(400), Duration.ofSeconds(2), Duration.ofMillis(400)))); p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BELL, 0.5f, 1.5f); } else if (newId == null && oldId != null) { Claim old = claims.get(oldId); if (old != null && !old.leaveMsg.isEmpty()) p.sendMessage(Color.colorize(old.leaveMsg.replace("%player%", p.getName()).replace("%owner%", old.ownerName).replace("%claim%", old.name))); p.showTitle(Title.title(comp("§7离开领地"), Component.empty(), Title.Times.times(Duration.ofMillis(300), Duration.ofSeconds(1), Duration.ofMillis(300)))); p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BOCK_BASS, 0.3f, 0.8f); } }
+    @EventHandler public void onMove(PlayerMoveEvent e) { Player p = e.getPlayer(); if (e.getFrom().getBlockX() == e.getTo().getBlockX() && e.getFrom().getBlockZ() == e.getTo().getBlockZ()) return; TpTask tp = tpTasks.get(p.getUniqueId()); if (tp != null) { if (Math.abs(e.getTo().getBlockX() - tp.dest.getBlockX()) > 1 || Math.abs(e.getTo().getBlockZ() - tp.dest.getBlockZ()) > 1 || Math.abs(e.getTo().getBlockY() - tp.dest.getBlockY()) > 1) { Bukkit.getScheduler().cancelTask(tp.taskId); tpTasks.remove(p.getUniqueId()); p.sendMessage(msg("prefix") + " §c传送已取消！"); } } if (p.getInventory().getItemInMainHand().getType() == Material.WOODEN_AXE) { Long last = lastParticle.get(p.getUniqueId()); if (last == null || System.currentTimeMillis() - last > 600) { lastParticle.put(p.getUniqueId(), System.currentTimeMillis()); Claim near = getClaimAt(p.getLocation(), null); if (near != null) showClaimParticles(p, near); } } PlayerData d = pd(p.getUniqueId()); if (!d.ignoreClaims) { Claim tc = getClaimAt(e.getTo(), d); if (tc != null && !tc.checkFlag(p.getUniqueId(), Flag.MOVE)) { e.setCancelled(true); return; } if (tc != null && !tc.checkFlag(p.getUniqueId(), Flag.FLY) && (p.isFlying() || p.isGliding())) { p.setFlying(false); p.setGliding(false); p.sendMessage(msg("prefix") + " §c此领地禁止飞行！"); } } Claim at = getClaimAt(e.getTo(), null); String newId = at != null ? at.id : null, oldId = currentClaim.get(p.getUniqueId()); if (Objects.equals(oldId, newId)) return; currentClaim.put(p.getUniqueId(), newId); if (newId != null && oldId == null) { Set<Flag> mf = at.memberFlags.get(p.getUniqueId()); String tag = at.owner.equals(p.getUniqueId()) ? "§a[主人] " : (mf != null ? "§e[成员] " : "§7"); if (!at.enterMsg.isEmpty()) p.sendMessage(Color.colorize(at.enterMsg.replace("%player%", p.getName()).replace("%owner%", at.ownerName).replace("%claim%", at.name))); p.showTitle(Title.title(comp(at.name, NamedTextColor.GREEN), comp(tag + "主人: " + at.ownerName, NamedTextColor.GRAY), Title.Times.times(Duration.ofMillis(400), Duration.ofSeconds(2), Duration.ofMillis(400)))); p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BELL, 0.5f, 1.5f); } else if (newId == null && oldId != null) { Claim old = claims.get(oldId); if (old != null && !old.leaveMsg.isEmpty()) p.sendMessage(Color.colorize(old.leaveMsg.replace("%player%", p.getName()).replace("%owner%", old.ownerName).replace("%claim%", old.name))); p.showTitle(Title.title(comp("§7离开领地"), Component.empty(), Title.Times.times(Duration.ofMillis(300), Duration.ofSeconds(1), Duration.ofMillis(300)))); p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 0.3f, 0.8f); } }
     private void showClaimParticles(Player p, Claim c) { World w = p.getWorld(); if (!w.getName().equals(c.world)) return; int y = p.getLocation().getBlockY(); Particle pt = c.owner.equals(p.getUniqueId()) ? Particle.HAPPY_VILLAGER : (c.memberFlags.containsKey(p.getUniqueId()) ? Particle.COMPOSTER : Particle.DRIPPING_LAVA); for (int x = c.minX; x <= c.maxX; x += 2) { spawnPt(p, pt, x, y, c.minZ); spawnPt(p, pt, x, y, c.maxZ); } for (int z = c.minZ; z <= c.maxZ; z += 2) { spawnPt(p, pt, c.minX, y, z); spawnPt(p, pt, c.maxX, y, z); } for (int dy = -1; dy <= 2; dy++) { spawnPt(p, pt, c.minX, y + dy, c.minZ); spawnPt(p, pt, c.maxX, y + dy, c.minZ); spawnPt(p, pt, c.minX, y + dy, c.maxZ); spawnPt(p, pt, c.maxX, y + dy, c.maxZ); } }
     private void spawnPt(Player p, Particle pt, int x, int y, int z) { p.spawnParticle(pt, x + 0.5, y + 0.5, z + 0.5, 1, 0, 0, 0, 0); }
     private Component comp(String s, NamedTextColor c) { return LegacyComponentSerializer.legacySection().deserialize(s).color(c); }

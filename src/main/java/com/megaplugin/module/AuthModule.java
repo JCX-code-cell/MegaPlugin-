@@ -22,6 +22,7 @@ import javax.crypto.spec.PBEKeySpec;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 认证模块 — 登录/注册/修改密码 + 冻结未登录玩家
@@ -30,11 +31,11 @@ import java.util.*;
 public class AuthModule extends MegaModule {
 
     private final DataFile data = new DataFile(plugin, "auth.yml");
-    private final Map<UUID, String> passwords = new HashMap<>();
-    private final Set<UUID> loggedIn = new HashSet<>();
-    private final Map<UUID, Integer> loginAttempts = new HashMap<>();
-    private final Map<UUID, Long> pendingLogin = new HashMap<>();
-    private final Map<UUID, String> regStep1 = new HashMap<>();
+    private final Map<UUID, String> passwords = new ConcurrentHashMap<>();
+    private final Set<UUID> loggedIn = ConcurrentHashMap.newKeySet();
+    private final Map<UUID, Integer> loginAttempts = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> pendingLogin = new ConcurrentHashMap<>();
+    private final Map<UUID, String> regStep1 = new ConcurrentHashMap<>();
 
     private static final int TIMEOUT = 60, MAX_ATTEMPTS = 5;
     private static final int PBKDF2_ITER = 120000; // OWASP 2023 推荐 ≥ 600k, 但兼顾性能取 120k
@@ -70,15 +71,22 @@ public class AuthModule extends MegaModule {
                 }
             }
         }.runTaskTimer(plugin, 20L, 20L);
+
+        // 定时自动保存 (每 5 分钟)
+        Bukkit.getScheduler().runTaskTimer(plugin, this::saveData, 6000L, 6000L);
     }
 
     @Override
     public void onDisable() {
-        for (var e : passwords.entrySet()) data.getConfig().set(e.getKey().toString(), e.getValue());
-        data.save();
+        saveData();
         loggedIn.clear();
         regStep1.clear();
         super.onDisable();
+    }
+
+    private void saveData() {
+        for (var e : passwords.entrySet()) data.getConfig().set(e.getKey().toString(), e.getValue());
+        data.save();
     }
 
     public boolean isLoggedIn(Player p) { return loggedIn.contains(p.getUniqueId()); }

@@ -19,3 +19,5 @@ Thumbs.db
 
 # Dependency
 dependency-reduced-pom.xml
+.gitignore
+compile*.txt

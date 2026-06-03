@@ -2,6 +2,7 @@ package com.megaplugin.module;
 
 import com.megaplugin.MegaPlugin;
 import com.megaplugin.util.DataFile;
+import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.command.*;
 import org.bukkit.entity.Player;
@@ -13,6 +14,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 物品绑定模块 — /bind /unbind /binds
@@ -21,7 +23,7 @@ import java.util.*;
 public class BindModule extends MegaModule {
 
     private final DataFile data = new DataFile(plugin, "binds.yml");
-    private final Map<UUID, Map<String, String>> binds = new HashMap<>();
+    private final Map<UUID, Map<String, String>> binds = new ConcurrentHashMap<>();
     private static final String LORE_PREFIX = "§8[§d绑定§8] §7";
 
     public BindModule(MegaPlugin plugin) { super(plugin); }
@@ -41,21 +43,28 @@ public class BindModule extends MegaModule {
                 UUID id = UUID.fromString(k);
                 var sec = data.getConfig().getConfigurationSection(k);
                 if (sec == null) continue;
-                Map<String, String> map = new HashMap<>();
+                ConcurrentHashMap<String, String> map = new ConcurrentHashMap<>();
                 for (String ik : sec.getKeys(false)) map.put(ik, sec.getString(ik));
                 if (!map.isEmpty()) binds.put(id, map);
             } catch (Exception ignored) {}
         }
+
+        // 定时自动保存 (每 5 分钟)
+        Bukkit.getScheduler().runTaskTimer(plugin, this::saveData, 6000L, 6000L);
     }
 
     @Override
     public void onDisable() {
+        saveData();
+        super.onDisable();
+    }
+
+    private void saveData() {
         for (var e : binds.entrySet()) {
             String p = e.getKey().toString();
             for (var b : e.getValue().entrySet()) data.getConfig().set(p + "." + b.getKey(), b.getValue());
         }
         data.save();
-        super.onDisable();
     }
 
     @EventHandler
@@ -109,7 +118,7 @@ public class BindModule extends MegaModule {
             if (item.getType() == Material.AIR) { p.sendMessage(msg("prefix") + " §c请手持物品！"); return true; }
             String cmd = String.join(" ", a);
             String k = key(item);
-            binds.computeIfAbsent(p.getUniqueId(), x -> new HashMap<>()).put(k, cmd);
+            binds.computeIfAbsent(p.getUniqueId(), x -> new ConcurrentHashMap<>()).put(k, cmd);
             applyLore(item, cmd);
             p.sendMessage(msg("prefix") + " §a已绑定 §e" + k + " §a→ §e/" + cmd);
             return true;

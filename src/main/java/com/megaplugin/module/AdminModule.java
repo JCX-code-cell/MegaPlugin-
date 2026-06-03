@@ -18,10 +18,10 @@ public class AdminModule extends MegaModule {
 
     @Override
     public void onEnable() {
-        cmd("gmc",     p -> mode(p, GameMode.CREATIVE,   "megaplugin.admin"));
-        cmd("gms",     p -> mode(p, GameMode.SURVIVAL,   "megaplugin.admin"));
-        cmd("gma",     p -> mode(p, GameMode.ADVENTURE,  "megaplugin.admin"));
-        cmd("gmsp",    p -> mode(p, GameMode.SPECTATOR,  "megaplugin.admin"));
+        cmd("gmc", (CommandSender s, Command c, String l, String[] a) -> { if (s instanceof Player p) mode(p, GameMode.CREATIVE, "megaplugin.admin"); else s.sendMessage(msg("player-only")); return true; });
+        cmd("gms", (CommandSender s, Command c, String l, String[] a) -> { if (s instanceof Player p) mode(p, GameMode.SURVIVAL, "megaplugin.admin"); else s.sendMessage(msg("player-only")); return true; });
+        cmd("gma", (CommandSender s, Command c, String l, String[] a) -> { if (s instanceof Player p) mode(p, GameMode.ADVENTURE, "megaplugin.admin"); else s.sendMessage(msg("player-only")); return true; });
+        cmd("gmsp", (CommandSender s, Command c, String l, String[] a) -> { if (s instanceof Player p) mode(p, GameMode.SPECTATOR, "megaplugin.admin"); else s.sendMessage(msg("player-only")); return true; });
         cmd("fly",     new FlyCmd());
         cmd("god",     new GodCmd());
         cmd("heal",    new HealCmd());

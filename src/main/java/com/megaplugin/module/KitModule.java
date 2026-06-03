@@ -11,6 +11,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitRunnable;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 礼包模块 — /kit /kits /createkit /deletekit
@@ -19,8 +20,8 @@ public class KitModule extends MegaModule {
 
     private final DataFile kitData = new DataFile(plugin, "kits.yml");
     private final DataFile cdData = new DataFile(plugin, "kit_cooldowns.yml");
-    private final Map<String, KitInfo> kits = new HashMap<>();
-    private final Map<UUID, Map<String, Long>> cooldowns = new HashMap<>();
+    private final Map<String, KitInfo> kits = new ConcurrentHashMap<>();
+    private final Map<UUID, Map<String, Long>> cooldowns = new ConcurrentHashMap<>();
 
     public KitModule(MegaPlugin plugin) { super(plugin); }
 
@@ -53,7 +54,7 @@ public class KitModule extends MegaModule {
                 UUID id = UUID.fromString(k);
                 var sec = cdData.getConfig().getConfigurationSection(k);
                 if (sec == null) continue;
-                Map<String, Long> map = new HashMap<>();
+                ConcurrentHashMap<String, Long> map = new ConcurrentHashMap<>();
                 for (String kit : sec.getKeys(false)) {
                     long t = sec.getLong(kit, 0);
                     if (t > System.currentTimeMillis()) map.put(kit, t);
@@ -134,7 +135,7 @@ public class KitModule extends MegaModule {
             }
 
             if (kit.cooldown > 0)
-                cooldowns.computeIfAbsent(p.getUniqueId(), k -> new HashMap<>())
+                cooldowns.computeIfAbsent(p.getUniqueId(), k -> new ConcurrentHashMap<>())
                         .put(name, System.currentTimeMillis() + kit.cooldown * 1000L);
 
             p.sendMessage(msg("prefix") + " §a已领取礼包 §e" + kit.name);

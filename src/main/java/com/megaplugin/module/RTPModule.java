@@ -9,6 +9,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.player.PlayerQuitEvent;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 随机传送模块 — /rtp
@@ -16,7 +17,7 @@ import java.util.*;
 public class RTPModule extends MegaModule {
 
     private static final int MIN_RADIUS = 200, MAX_RADIUS = 20000, MAX_ATTEMPTS = 25;
-    private final Map<UUID, Long> cooldowns = new HashMap<>();
+    private final Map<UUID, Long> cooldowns = new ConcurrentHashMap<>();
     private final Random random = new Random();
 
     public RTPModule(MegaPlugin plugin) { super(plugin); }
@@ -49,7 +50,7 @@ public class RTPModule extends MegaModule {
             if (f == Material.LAVA || f == Material.WATER) continue;
             if (f != Material.AIR && f != Material.SHORT_GRASS && f != Material.TALL_GRASS) continue;
             if (!g.isSolid() || h.isSolid()) continue;
-            String biome = world.getBiome(loc).name();
+            String biome = world.getBiome(loc).getKey().getKey();
             if (biome.contains("OCEAN") || biome.contains("RIVER")) continue;
             return loc;
         }

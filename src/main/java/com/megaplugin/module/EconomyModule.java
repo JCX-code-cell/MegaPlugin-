@@ -19,6 +19,7 @@ public class EconomyModule extends MegaModule {
 
     private final DataFile data = new DataFile(plugin, "economy.yml");
     private final Map<UUID, Long> balances = new ConcurrentHashMap<>(); // 余额单位: 分（1 元 = 100 分）
+    private final Map<UUID, Long> payCooldowns = new ConcurrentHashMap<>(); // /pay 冷却 (ms)
 
     public EconomyModule(MegaPlugin plugin) { super(plugin); }
 
@@ -72,12 +73,14 @@ public class EconomyModule extends MegaModule {
 
     /** 存款 */
     public boolean deposit(UUID id, double amount) {
+        if (amount <= 0) return false;
         balances.merge(id, toCents(amount), Long::sum);
         return true;
     }
 
     /** 取款 (余额不足返回 false) */
     public boolean withdraw(UUID id, double amount) {
+        if (amount <= 0) return false;
         long c = toCents(amount), current = balances.getOrDefault(id, 0L);
         if (current < c) return false;
         balances.put(id, current - c);
@@ -86,6 +89,7 @@ public class EconomyModule extends MegaModule {
 
     /** 转账 */
     public boolean transfer(UUID from, UUID to, double amount) {
+        if (amount <= 0) return false;
         long c = toCents(amount);
         long current = balances.getOrDefault(from, 0L);
         if (current < c) return false;
@@ -137,6 +141,17 @@ public class EconomyModule extends MegaModule {
             if (!(s instanceof Player p)) { s.sendMessage(msg("player-only")); return true; }
             if (!p.hasPermission("megaplugin.economy")) { p.sendMessage(msg("no-permission")); return true; }
             if (a.length < 2) { p.sendMessage(msg("prefix") + " §c用法: /pay <玩家> <金额>"); return true; }
+
+            // 频率限制 (默认 2 秒)
+            long cdMs = plugin.getConfig().getLong("economy.pay-cooldown", 2) * 1000L;
+            long now = System.currentTimeMillis();
+            Long last = payCooldowns.get(p.getUniqueId());
+            if (last != null && now - last < cdMs) {
+                long remain = (cdMs - (now - last)) / 1000;
+                p.sendMessage(msg("prefix") + " §c操作太快！请等待 §e" + remain + "秒");
+                return true;
+            }
+
             Player t = player(a[0]);
             if (t == null || t == p) { p.sendMessage(msg("prefix") + " §c目标无效！"); return true; }
             double amount;
@@ -146,6 +161,7 @@ public class EconomyModule extends MegaModule {
                 p.sendMessage(msg("prefix") + " §c余额不足！当前: " + fmt(bal(p.getUniqueId())));
                 return true;
             }
+            payCooldowns.put(p.getUniqueId(), now);
             p.sendMessage(msg("prefix") + " §a已向 §e" + t.getName() + " §a支付 §e" + fmt(amount));
             t.sendMessage(msg("prefix") + " §a收到 §e" + fmt(amount) + " §a来自 §e" + p.getName());
             return true;
@@ -166,6 +182,7 @@ public class EconomyModule extends MegaModule {
             if (t == null) { s.sendMessage(msg("player-not-found")); return true; }
             double amount;
             try { amount = Double.parseDouble(a[2]); } catch (Exception ex) { s.sendMessage(msg("invalid-number")); return true; }
+            if (amount <= 0 && !a[0].equalsIgnoreCase("set")) { s.sendMessage(msg("prefix") + " §c金额必须大于 0！"); return true; }
             UUID id = t.getUniqueId();
             String name = t.getName() != null ? t.getName() : a[1];
             switch (a[0].toLowerCase()) {

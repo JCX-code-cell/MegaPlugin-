@@ -16,6 +16,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 玩家市场模块 — /market GUI 浏览/上架/下架/购买
@@ -29,8 +30,8 @@ public class MarketModule extends MegaModule {
 
     private final DataFile data = new DataFile(plugin, "market.yml");
     private final List<MarketItem> listings = new ArrayList<>();
-    private final Map<UUID, Integer> browsingPage = new HashMap<>();
-    private final Map<UUID, MarketItem> pendingBuy = new HashMap<>();
+    private final Map<UUID, Integer> browsingPage = new ConcurrentHashMap<>();
+    private final Map<UUID, MarketItem> pendingBuy = new ConcurrentHashMap<>();
 
     public MarketModule(MegaPlugin plugin) { super(plugin); }
 
@@ -55,6 +56,9 @@ public class MarketModule extends MegaModule {
                 } catch (Exception ignored) {}
             }
         }
+
+        // 定时自动保存 (每 5 分钟)
+        Bukkit.getScheduler().runTaskTimer(plugin, this::save, 6000L, 6000L);
     }
 
     @Override

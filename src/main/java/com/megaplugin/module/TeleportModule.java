@@ -7,6 +7,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.command.*;
 import org.bukkit.entity.Player;
@@ -16,14 +17,15 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 传送模块 — /tpa /tpahere /tpaccept /tpdeny /tp /tphere /tpo /back
  */
 public class TeleportModule extends MegaModule {
 
-    private final Map<UUID, TeleportRequest> requests = new HashMap<>();
-    private final Map<UUID, Location> lastLocation = new HashMap<>();
+    private final Map<UUID, TeleportRequest> requests = new ConcurrentHashMap<>();
+    private final Map<UUID, Location> lastLocation = new ConcurrentHashMap<>();
     private final DataFile data = new DataFile(plugin, "tp_data.yml");
 
     public TeleportModule(MegaPlugin plugin) { super(plugin); }
@@ -47,14 +49,21 @@ public class TeleportModule extends MegaModule {
                 if (loc != null) lastLocation.put(id, loc);
             } catch (Exception ignored) {}
         }
+
+        // 定时自动保存 (每 5 分钟)
+        Bukkit.getScheduler().runTaskTimer(plugin, this::saveData, 6000L, 6000L);
     }
 
     @Override
     public void onDisable() {
+        saveData();
+        super.onDisable();
+    }
+
+    private void saveData() {
         for (var e : lastLocation.entrySet())
             data.getConfig().set(e.getKey().toString(), e.getValue());
         data.save();
-        super.onDisable();
     }
 
     private void cmd(String name, CommandExecutor exe) {

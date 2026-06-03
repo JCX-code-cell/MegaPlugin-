@@ -3,11 +3,13 @@ package com.megaplugin.module;
 import com.megaplugin.MegaPlugin;
 import com.megaplugin.util.DataFile;
 import net.kyori.adventure.text.Component;
+import org.bukkit.BanList;
 import org.bukkit.Bukkit;
 import org.bukkit.command.*;
 import org.bukkit.entity.Player;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 渐进式惩罚模块 — 跨重启累计违规，自动封禁
@@ -15,7 +17,7 @@ import java.util.*;
 public class PunishModule extends MegaModule {
 
     private final DataFile data = new DataFile(plugin, "punish_records.yml");
-    private final Map<UUID, Map<String, Integer>> records = new HashMap<>();
+    private final Map<UUID, Map<String, Integer>> records = new ConcurrentHashMap<>();
 
     public PunishModule(MegaPlugin plugin) { super(plugin); }
 
@@ -24,7 +26,7 @@ public class PunishModule extends MegaModule {
         for (String id : data.getConfig().getKeys(false)) {
             try {
                 UUID uid = UUID.fromString(id);
-                Map<String, Integer> rec = new HashMap<>();
+                ConcurrentHashMap<String, Integer> rec = new ConcurrentHashMap<>();
                 var sec = data.getConfig().getConfigurationSection(id);
                 if (sec != null) for (String check : sec.getKeys(false))
                     rec.put(check, sec.getInt(check, 0));
@@ -33,6 +35,9 @@ public class PunishModule extends MegaModule {
         }
         var c = plugin.getCommand("megapunish");
         if (c != null) c.setExecutor(new PunishCmd());
+
+        // 定时自动保存 (每 5 分钟)
+        Bukkit.getScheduler().runTaskTimer(plugin, this::save, 6000L, 6000L);
     }
 
     @Override
@@ -49,7 +54,7 @@ public class PunishModule extends MegaModule {
     }
 
     public int addVL(Player p, String type) {
-        var rec = records.computeIfAbsent(p.getUniqueId(), k -> new HashMap<>());
+        var rec = records.computeIfAbsent(p.getUniqueId(), k -> new ConcurrentHashMap<>());
         int total = rec.merge(type, 1, Integer::sum);
         save();
         if (total % 5 == 0 || total == 3)
@@ -85,7 +90,7 @@ public class PunishModule extends MegaModule {
 
         String reason = "作弊 | 累计" + total + "次 | " + duration;
         p.kick(Component.text("§c检测到作弊行为\n§7累计 §4" + total + " §7次\n§7封禁: §e" + duration));
-        Bukkit.getServer().ban(p.getAddress().getAddress().getHostAddress(), reason, expires, "MegaPlugin");
+        Bukkit.getBanList(BanList.Type.IP).addBan(p.getAddress().getAddress().getHostAddress(), reason, expires, "MegaPlugin");
         Bukkit.broadcast(Component.text("§8[§c§l反作弊§8] §e" + p.getName() + " §c因作弊被 §4" + duration + " §c封禁！"));
     }
 

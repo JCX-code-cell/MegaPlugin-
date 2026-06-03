@@ -4,7 +4,6 @@ import com.megaplugin.MegaPlugin;
 import com.megaplugin.util.DataFile;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.command.*;
 import org.bukkit.entity.Player;
