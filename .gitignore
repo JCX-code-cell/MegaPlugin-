@@ -21,3 +21,5 @@ Thumbs.db
 dependency-reduced-pom.xml
 .gitignore
 compile*.txt
+sources.txt
+sources_win.txt

@@ -1,4 +1,4 @@
-# MegaPlugin v2.0
+# MegaPlugin v3.0
 
 > 全能型 Minecraft Purpur/Paper 服务端插件 — 一站式管理解决方案
 
@@ -58,17 +58,20 @@
 ## 🛠 构建
 
 ```bash
-# 需要 Maven + JDK 21
+# 需要 JDK 21
 git clone https://github.com/JCX-code-cell/MegaPlugin-.git
 cd MegaPlugin-
-mvn clean package
-# 输出: target/MegaPlugin-1.0.0.jar
+# 使用提供的 compile.sh (Linux/macOS) 或 compile.bat (Windows)
+bash compile.sh
+# 输出: target/MegaPlugin.jar
 ```
+
+> 也可以直接用 javac 编译，参见 `compile.sh` 中的命令。
 
 ## ⚠️ 注意事项
 
 - **仓库仅包含源码，不提供预编译 JAR 文件。请自行构建。**
-- **当前版本存在部分已知问题**，正在持续修复中。
+- 支持 Minecraft 1.21.1，需要 Purpur/Paper 服务端。
 - 欢迎反馈 bug 或贡献代码。
 
 ## 📧 联系方式

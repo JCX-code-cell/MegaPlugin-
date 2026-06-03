@@ -1,5 +1,5 @@
 name: MegaPlugin
-version: "2.0.0"
+version: "3.0.0"
 main: com.megaplugin.MegaPlugin
 api-version: "1.21"
 description: 全能型 Minecraft 服务端插件 — 家园/领地/经济/市场/传送/认证/管理
