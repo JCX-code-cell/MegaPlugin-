@@ -177,6 +177,9 @@ public class ClaimModule extends MegaModule {
     public void onDisable() { saveAll(); }
 
     private void loadClaims() {
+        // 自动迁移旧数据 (claims.yml -> claims_v2.yml)
+        migrateOldData();
+
         var cfg = data.getConfig();
         for (String key : cfg.getKeys(false)) {
             try {
@@ -210,6 +213,38 @@ public class ClaimModule extends MegaModule {
                 claims.put(key, c);
             } catch (Exception e) { plugin.getLogger().warning("[Claim] 加载领地 " + key + " 失败: " + e.getMessage()); }
         }
+    }
+
+    /** 从 claims.yml (v1 格式) 迁移到 claims_v2.yml */
+    private void migrateOldData() {
+        DataFile oldData = new DataFile(plugin, "claims.yml");
+        if (!oldData.getFile().exists()) return;
+        if (data.getConfig().getKeys(false).size() > 0) return;
+        boolean migrated = false;
+        for (String uuidStr : oldData.getConfig().getKeys(false)) {
+            try {
+                UUID owner = UUID.fromString(uuidStr);
+                var sec = oldData.getConfig().getConfigurationSection(uuidStr);
+                if (sec == null) continue;
+                for (String claimName : sec.getKeys(false)) {
+                    String id = nextId();
+                    Claim c = new Claim();
+                    c.id = id; c.name = claimName; c.owner = owner;
+                    c.ownerName = sec.getString(claimName + ".ownerName", "?");
+                    c.world = sec.getString(claimName + ".world", "world");
+                    c.minX = sec.getInt(claimName + ".minX"); c.minZ = sec.getInt(claimName + ".minZ");
+                    c.maxX = sec.getInt(claimName + ".maxX"); c.maxZ = sec.getInt(claimName + ".maxZ");
+                    c.enterMsg = sec.getString(claimName + ".enterMessage", "");
+                    c.leaveMsg = sec.getString(claimName + ".leaveMessage", "");
+                    var fsec = sec.getConfigurationSection(claimName + ".flags");
+                    if (fsec != null) for (String fk : fsec.getKeys(false)) c.flags.put(fk, fsec.getBoolean(fk));
+                    for (String tid : sec.getStringList(claimName + ".trusted")) try { c.members.put(UUID.fromString(tid), Role.MEMBER); } catch (Exception ignored) {}
+                    for (String bid : sec.getStringList(claimName + ".banned")) try { c.members.put(UUID.fromString(bid), Role.BANNED); } catch (Exception ignored) {}
+                    claims.put(id, c); migrated = true;
+                }
+            } catch (Exception e) { plugin.getLogger().warning("[Claim] 迁移旧数据失败: " + e.getMessage()); }
+        }
+        if (migrated) { plugin.getLogger().info("[Claim] 已从 claims.yml 迁移旧领地数据到 claims_v2.yml"); saveAll(); }
     }
 
     private void saveAll() {

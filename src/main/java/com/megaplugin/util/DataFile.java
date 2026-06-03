@@ -40,6 +40,10 @@ public class DataFile {
         return config;
     }
 
+    public File getFile() {
+        return file;
+    }
+
     public void save() {
         try {
             config.save(file);
