@@ -17,24 +17,25 @@
 | 📋 **服务器菜单** | `/menu` - 全功能 GUI 主菜单 |
 | 🔗 **物品绑定** | `/bind` `/unbind` `/binds` - 手持右键执行命令 |
 | 🏪 **玩家市场** | `/market` `/ah` `/shop` - 可视化交易系统 |
-| 🔐 **登录系统** | 安全，快速简便的登录系统 |
+| 🏡 **领地系统** | `/claim` - GUI可视化领地创建/扩展/收缩/信息，租赁/出售/红石限制/旗帜设置/刷怪笼限制 |
 
-权限节点
+## 🔑 权限节点
 
 | 权限 | 默认 | 说明 |
 |------|------|------|
 | `megaplugin.*` | OP | 所有权限 |
 | `megaplugin.home` | 所有人 | 家园基础权限 |
+| `megaplugin.claim` | 所有人 | 领地基础权限 |
 | `megaplugin.admin` | OP | 管理命令 |
 | `megaplugin.economy.admin` | OP | 经济管理 |
 | `megaplugin.market` | 所有人 | 使用市场 |
 
-技术栈
+## 🛠 技术栈
 - Java 21
 - Bukkit/Paper/Purpur API
 - SHA-256 + 盐值密码加密
 - YAML 数据持久化
 - Adventure 组件（可点击消息）
 
-许可证
+## 📄 许可证
 GPL-3.0
